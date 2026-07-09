@@ -2392,19 +2392,24 @@ app.post('/api/ai/time-travel-headline', auth, async (req, res) => {
   try {
     const games = await recentUserGames(req.user.username, 20);
     const interests = [...new Set(games.map(g => `${g.topic} / ${g.concept}`).filter(Boolean))].slice(-10);
+    const status = summarizeLearnerStatus(games);
     const result = await generateStructured([
       {
         role: 'system',
-        content: `Return JSON only: {"headline":string}
+        content: `You invent the seed headline for the "Time Travel" activity on this learning site.
+
+How this site teaches: the headline becomes an adaptive slide presentation set in a chosen era. Each slide explains real concepts (causes, impacts, practical solutions) with support material and one challenging multiple-choice question; the learner's answer decides the next slide (wrong → correct the misconception, right → go deeper). So the headline should open a genuinely teachable, problem-solving scenario — not just a flashy title.
+
+Personalize to the learner's status below: lean toward their interests and weak spots so the resulting lesson reinforces what they need, while staying fresh (avoid repeating the "Avoid headlines").
+
+Return JSON only: {"headline":string}
 Rules:
-- Create one compelling news-style headline.
-- The scenario must be in the ${normalizedPeriod}.
-- Keep it educational and problem-solving oriented.
-- 7-16 words, classroom-safe, no sensational violence.`
+- One compelling, classroom-safe news-style headline set in the ${normalizedPeriod}.
+- Educational and problem-solving oriented; 7-16 words; no sensational violence.`
       },
       {
         role: 'user',
-        content: `Learner interests:\n${interests.join('\n') || 'none yet'}\n\nTrend seeds:\n${GLOBAL_TREND_SEEDS.join('\n')}\n\nAvoid headlines:\n${[...avoidSet].join('\n') || 'none'}`
+        content: `Learner interests:\n${interests.join('\n') || 'none yet'}\n\nLearner status data:\n${status}\n\nTrend seeds:\n${GLOBAL_TREND_SEEDS.join('\n')}\n\nAvoid headlines:\n${[...avoidSet].join('\n') || 'none'}`
       }
     ], { temperature: 0.85, maxTokens: 240 });
 
