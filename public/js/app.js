@@ -270,14 +270,14 @@ function renderLearningPathSection() {
   return `
     <section style="max-width:860px;margin:18px auto 0">
       <h4 class="activity-heading" style="margin:0 0 6px;opacity:.9;max-width:760px">Start a Learning path</h4>
-      <div class="chip-row">${state.homeTopics.map(t => `<button class="chip" data-topic="${esc(t)}">${esc(t)}</button>`).join('')}</div>
-      <div class="slide-actions" style="justify-content:center;margin-top:10px">
-        <button class="btn small blue" id="refresh-home-topics">↻ Refresh 12 topic ideas</button>
-      </div>
-      <div class="card alt" style="max-width:560px;margin:16px auto 0">
-        <label class="field"><span>…or a custom topic</span>
+      <div class="card alt" style="max-width:560px;margin:12px auto 0">
+        <label class="field"><span>Type a topic to learn</span>
           <input type="text" id="custom-topic" placeholder="e.g. Renaissance art, Rust programming, beekeeping…" /></label>
         <button class="btn primary" id="custom-topic-btn">Draw my path →</button>
+      </div>
+      <div class="chip-row" style="margin-top:16px">${state.homeTopics.map(t => `<button class="chip" data-topic="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+      <div class="slide-actions" style="justify-content:center;margin-top:10px">
+        <button class="btn small blue" id="refresh-home-topics">↻ Refresh 12 topic ideas</button>
       </div>
     </section>`;
 }
