@@ -656,7 +656,21 @@ function makeUser(username, password, role) {
 }
 
 // ---------- sessions (signed stateless auth tokens) ----------
-const AUTH_TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET || DATABASE_URL || 'local-dev-session-secret';
+// Never sign tokens with a secret that ships in the repo. In production a real
+// AUTH_TOKEN_SECRET is required; otherwise anyone could forge an admin token.
+const AUTH_TOKEN_SECRET = (() => {
+  if (hasConfiguredKey(process.env.AUTH_TOKEN_SECRET)) return process.env.AUTH_TOKEN_SECRET;
+  if (hasConfiguredKey(DATABASE_URL)) {
+    console.warn('WARNING: AUTH_TOKEN_SECRET not set — falling back to DATABASE_URL as the token-signing secret. Set a dedicated AUTH_TOKEN_SECRET for production.');
+    return DATABASE_URL;
+  }
+  if (process.env.NODE_ENV === 'production') {
+    console.error('FATAL: AUTH_TOKEN_SECRET is not set. Refusing to start in production with the public default secret. Set a strong, random AUTH_TOKEN_SECRET (e.g. `openssl rand -hex 32`).');
+    process.exit(1);
+  }
+  console.warn('WARNING: AUTH_TOKEN_SECRET not set — using an insecure local-development default. Never deploy without setting AUTH_TOKEN_SECRET.');
+  return 'local-dev-session-secret';
+})();
 const AUTH_TOKEN_TTL_SEC = Math.max(300, parseInt(process.env.AUTH_TOKEN_TTL_SEC, 10) || (60 * 60 * 24 * 30));
 
 function b64urlEncode(input) {
