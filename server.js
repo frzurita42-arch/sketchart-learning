@@ -1535,19 +1535,10 @@ function enforceVisualCyclePolicy(slide, context = {}) {
 
   const visualTypes = new Set(['table', 'svg', 'image', 'latex', 'code']);
   const nonVisual = slide.components.filter(c => !visualTypes.has(c?.type));
-  const cycle = context.isTimeTravel
-    ? 'image'
-    : ['image', 'table', 'svg'][(Math.max(1, Number(context.slideNumber || 1)) - 1) % 3];
+  const cycle = (Math.max(1, Number(context.slideNumber || 1)) % 2 === 0) ? 'table' : 'svg';
 
   let visual = null;
-  if (cycle === 'image') {
-    visual = {
-      type: 'image',
-      prompt: buildGenericImagePrompt(slide, context),
-      frame: Number(context.slideNumber || 1) % 2 === 0 ? 'polaroid' : 'paper',
-      caption: `${context.isTimeTravel ? 'Time Travel' : 'Learning'} image: Slide ${context.slideNumber || 1} - ${String(slide.title || context.concept || 'concept').trim()}`
-    };
-  } else if (cycle === 'table') {
+  if (cycle === 'table') {
     visual = makeFallbackTable(slide, context);
   } else {
     visual = makeFallbackGraphSvg(slide, context);
@@ -2203,14 +2194,9 @@ app.post('/api/ai/slide', auth, async (req, res) => {
     'mostly-visual': `Lead with 1-2 visual components that dominate the slide, but STILL include at least TWO connected paragraphs (each ${paragraphWords} words) explaining them.`
   }[settings.imageDensity] || 'Include one visual component alongside the paragraphs.';
   const allowModelSvg = !imageEnabled && !claudeSvgEnabled;
-  const imageComponentLine = imageEnabled
-    ? `\n   {"type":"image","prompt":string (vivid description of an illustration to GENERATE that depicts THIS slide's concept),"frame":"paper"|"polaroid","caption":string} |`
-    : '';
-  const visualMenu = imageEnabled
-    ? 'a LaTeX formula, a code snippet, a compact table, or a generated image'
-    : (allowModelSvg
-      ? 'a LaTeX formula, a code snippet, a compact table, or a labelled svg diagram'
-      : 'a LaTeX formula, a code snippet, or a compact table');
+  const visualMenu = allowModelSvg
+    ? 'a compact table, or a labelled svg graph/diagram'
+    : 'a compact table, or a graph/diagram (svg generated in post-processing)';
   const isTimeTravelActivity = settings.activityType === 'time-travel' || /time\s*travel|\bfuture\b|\bpast\b|\bpresent\b|headline|news/i.test(`${topic} ${concept} ${settings.customInstructions || ''}`);
   const canGenerateImage = true;
   const stemFocus = /math|physics|program|algorithm|computer|data|statistics|calculus|algebra|geometry|numerical|machine learning|ai|engineering|cryptography|proof|equation|formula|theorem|derivative|integral|linear algebra|probability/i
@@ -2241,7 +2227,8 @@ app.post('/api/ai/slide', auth, async (req, res) => {
    {"type":"table","headers":[string,...],"rows":[[string,...],...],"caption":string} |
    {"type":"latex","content":string (a DISPLAY formula in LaTeX, WITHOUT surrounding $),"caption":string} |
    {"type":"code","language":string,"content":string (a real, correct, well-formatted snippet with newlines)} |
-  ${allowModelSvg ? '{"type":"svg","svg":"<svg...>","caption":string} |\n   ' : ''}{"type":"image","prompt":string (vivid description of an illustration to GENERATE that depicts THIS slide's concept),"frame":"paper"|"polaroid","caption":string}
+  {"type":"svg","svg":"<svg...>","caption":string} |
+  {"type":"table","headers":[string,...],"rows":[[string,...],...],"caption":string}
  ],
  "quiz": {
    "question": string,
@@ -2256,7 +2243,7 @@ Rules:
 - LENGTH: the slide MUST contain exactly ${paraCount} distinct paragraph(s) of prose (as separate "text" components), each about ${paragraphWords} words. Do not collapse them, and do not pad — each paragraph carries new substance. ${densityRule}
 - VISUAL COUNT: include AT MOST ONE primary visual component on this slide from [table, svg, image, latex, code]. Never include more than one of these in the same slide.
 - COHESION: the paragraphs must build on one another in order — introduce the idea, develop it, then apply or consolidate it — never restating the same point. The slide must also connect to the previous slides (briefly recall or build on them) and set up what comes next, so the whole presentation reads as one continuous, complementary lesson rather than isolated cards.
-- VISUALS: pick the visual that BEST fits this slide and make it ACCURATELY represent what the paragraphs say — never a generic or decorative figure (no meaningless Venn diagrams, plain squares, or random shapes). Choose from ${visualMenu}: use a LaTeX formula when the idea is mathematical, a code snippet (with the correct language) when it is about programming/algorithms/data, ${imageEnabled ? 'and a generated image when a rich pictorial or real-world depiction helps understanding. ' : ''}${allowModelSvg ? 'and a labelled svg diagram when the idea is a structure, process, or relationship. ' : ''}Vary the visual type across consecutive slides and keep exactly one primary visual component.
+- VISUALS: pick the visual that BEST fits this slide and make it ACCURATELY represent what the paragraphs say — never a generic or decorative figure (no meaningless Venn diagrams, plain squares, or random shapes). Use only TABLES or SVG graphs/diagrams for this deployment. Vary table vs svg across consecutive slides and keep exactly one primary visual component.
 - TABLES: when using a table, keep it compact (3-6 rows, 2-6 columns), label headers clearly, and ensure every row directly supports the slide's teaching point.
 - UNIQUENESS: do not reuse the same visual from previous slides in this activity. Create a new visual tailored to THIS slide only.
 - QUIZ ALIGNMENT: the visual must directly help answer this slide's multiple-choice question or explain one likely misconception.
@@ -2265,15 +2252,9 @@ Rules:
 - Any formula/proof/code explanation should be as substantial as the selected paragraph length setting; avoid tiny token examples for long-form settings.
 - ${stemFocus ? `${stemAlternation} For this STEM-heavy concept, include both: (1) a visual component (image/svg when available) and (2) either a code snippet or a LaTeX formula/proof block, plus textual explanation tying them together.` : 'Use STEM-style formula/code components only when they naturally fit the concept.'}
 - ${isTimeTravelActivity
-    ? (canGenerateImage
-      ? 'This is a Time Travel activity slide: include ONE generated image as the primary visual. The image must depict the concept in a time-accurate setting (past/present/future) with concrete details (architecture, transport, tools, clothing, environment).'
-      : 'This is a Time Travel activity slide: include at least ONE strong visual aid (svg/table/latex/code) that makes the timeline dynamics explicit and practical.')
-    : 'For non-time-travel activities, include tables only when they add clear explanatory value.'}
-- ${isTimeTravelActivity
-    ? (canGenerateImage
-      ? 'For this Time Travel slide, the ONE primary visual MUST be an image prompt suitable for generation, unique versus previous slides.'
-      : 'For this Time Travel slide, the ONE primary visual should be a non-image visual specific to this slide question.')
-    : 'For other activities, choose one visual that best supports this slide and keep it unique vs prior slides.'}
+    ? 'This is a Time Travel activity slide: use a timeline-focused TABLE or SVG graph only (no image generation).'
+    : 'For non-time-travel activities, use TABLE or SVG graph visuals only (no image generation).'}
+- For this deployment, NEVER emit image components.
 - Tone/sentiment of all writing: ${settings.tone || 'friendly lecture'}. Complexity of language: ${settings.complexity || 'standard'}. Audience level: ${level}.
 ${settings.language ? `- Write ALL text (including quiz and explanations) in ${settings.language}.\n` : ''}${settings.audience ? `- The reader is: ${settings.audience}. Pitch every explanation to them.\n` : ''}${settings.customInstructions ? `- Extra author instructions from the learner (follow them where they don't conflict with the schema): ${settings.customInstructions}\n` : ''}
 - The ${paraCount} substantive paragraph(s) are required every time, alongside the chosen visual(s).
@@ -2303,7 +2284,7 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
       isTimeTravel: isTimeTravelActivity,
       customInstructions: settings.customInstructions || ''
     });
-    slide.components = await fillImages(slide.components);
+    slide.components = (slide.components || []).filter(c => c?.type !== 'image');
     if (settings.imageDensity === 'text-only') {
       slide.components = (slide.components || []).filter(c => !['svg', 'image', 'latex', 'code', 'table'].includes(c.type));
     }
@@ -2338,7 +2319,7 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
       isTimeTravel: isTimeTravelActivity,
       customInstructions: settings.customInstructions || ''
     });
-    slide.components = await fillImages(slide.components); // generate any requested images (no-op without an image key)
+    slide.components = (slide.components || []).filter(c => c?.type !== 'image');
     // Have Claude draw this slide's diagram, contextual to concept/level/progress
     // (unless the learner chose text-only). No-op without an Anthropic key.
     if (settings.imageDensity === 'text-only') {
