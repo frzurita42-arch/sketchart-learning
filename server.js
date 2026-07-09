@@ -1348,7 +1348,7 @@ function componentVisualSignature(component) {
 }
 
 function enforceSlideVisualPolicy(slide, history = [], slideNumber = 1) {
-  const visualTypes = new Set(['table']);
+  const visualTypes = new Set(['table', 'image', 'latex', 'code', 'svg']);
   const normalizeSig = (value) => String(value || '')
     .toLowerCase()
     .replace(/slide\s*\d+/g, 'slide')
@@ -1408,6 +1408,11 @@ function enforceSlideVisualPolicy(slide, history = [], slideNumber = 1) {
       oneVisual.headers = oneVisual.headers.slice(0, width);
     }
     oneVisual.caption = `Slide ${slideNumber}: ${String(oneVisual.caption || 'comparison table').trim()}`;
+    return;
+  }
+  if (oneVisual.type === 'image') {
+    oneVisual.caption = `Slide ${slideNumber}: ${String(oneVisual.caption || oneVisual.alt || 'concept illustration').trim()}`;
+    if (oneVisual.prompt) oneVisual.prompt = `${String(oneVisual.prompt).trim()} Distinct slide perspective ${slideNumber}.`;
     return;
   }
   if (oneVisual.type === 'latex') {
@@ -1501,6 +1506,86 @@ function buildGenericImagePrompt(slide, context = {}) {
   ].join(' ');
 }
 
+function summarizeLearnerVisualProfile(games = []) {
+  const recent = Array.isArray(games) ? games.slice(-12) : [];
+  if (!recent.length) return { avgScore: 0.65, lowConfidence: false, note: 'no prior history available' };
+  const ratios = recent
+    .map(g => {
+      const total = Math.max(1, Number(g?.total) || 1);
+      const correct = Math.max(0, Number(g?.correct) || 0);
+      return correct / total;
+    })
+    .filter(Number.isFinite);
+  const avgScore = ratios.length ? (ratios.reduce((a, b) => a + b, 0) / ratios.length) : 0.65;
+  const lowConfidence = avgScore < 0.58;
+  return {
+    avgScore,
+    lowConfidence,
+    note: lowConfidence
+      ? 'recent quizzes show lower confidence; add more concrete visuals for comprehension when topic fit is high'
+      : 'recent quizzes show stable understanding; use visuals only when they add explanatory value'
+  };
+}
+
+function decideAdaptiveVisualMode({ topic = '', concept = '', settings = {}, proofMode = false, isTimeTravelActivity = false, stemFocus = false, learnerProfile = null } = {}) {
+  const density = ['text-only', 'mostly-text', 'balanced', 'mostly-visual'].includes(settings.imageDensity)
+    ? settings.imageDensity
+    : 'balanced';
+  const text = `${topic} ${concept} ${settings.customInstructions || ''}`.toLowerCase();
+  const technical = stemFocus || /algorithm|proof|calculus|algebra|statistics|equation|derivative|integral|linear algebra|coding|programming|compiler|data structure|cryptography/.test(text);
+  const illustrative = /history|biology|anatomy|brain|cell|ecosystem|geography|culture|art|architecture|medicine|human body|botany|zoology|timeline|civilization/.test(text);
+  const lowConfidence = !!learnerProfile?.lowConfidence;
+
+  if (density === 'text-only') {
+    return {
+      density,
+      allowImages: false,
+      preferredVisual: proofMode ? 'latex' : 'none',
+      targetImageSlots: 0,
+      promptRule: 'Learner selected text-only output; do not include image or svg components.'
+    };
+  }
+
+  if (proofMode || technical) {
+    return {
+      density: density === 'mostly-visual' ? 'balanced' : density,
+      allowImages: false,
+      preferredVisual: 'latex/table/code',
+      targetImageSlots: 0,
+      promptRule: 'This topic is technical/proof-heavy. Prefer text + latex/code/table. Do not use image components unless explicitly necessary (normally zero images).'
+    };
+  }
+
+  if (isTimeTravelActivity || illustrative) {
+    const target = density === 'mostly-visual' ? 1 : (lowConfidence ? 1 : 1);
+    return {
+      density,
+      allowImages: true,
+      preferredVisual: 'image',
+      targetImageSlots: target,
+      promptRule: `This topic is illustration-friendly. Include ${target} meaningful image component that explains the concept (not decoration), and keep the prose connected to it.`
+    };
+  }
+
+  if (density === 'mostly-visual') {
+    return {
+      density,
+      allowImages: true,
+      preferredVisual: 'image',
+      targetImageSlots: 1,
+      promptRule: 'Learner requested a visual-heavy slide. Include one concept-explaining image component plus explanatory text.'
+    };
+  }
+
+  return {
+    density,
+    allowImages: false,
+    preferredVisual: 'table',
+    targetImageSlots: 0,
+    promptRule: 'Use text-first explanation. Use non-image visuals only when they improve understanding.'
+  };
+}
+
 function makeFallbackTable(slide, context = {}) {
   const title = String(slide?.title || context.concept || 'Concept').trim();
   const quiz = String(slide?.quiz?.question || 'How do we evaluate this concept?').trim();
@@ -1579,26 +1664,21 @@ A\mathbf{x} &= \lambda\mathbf{x} && \text{eigenvector relation} \\
     return String.raw`\begin{aligned}
 F &= ma && \text{Newton's second law} \\
 a &= \frac{\Delta v}{\Delta t} && \text{acceleration from velocity change} \\
-	ext{Combine the relation with the problem's givens.} && ${tailComment}
+  ext{Combine the relation with the problem's givens.} && ${tailComment}
 \end{aligned}`;
   }
 
   return String.raw`\begin{aligned}
-	ext{Claim: } & ${String(concept || topic || 'the result')} && \text{state the goal} \\
-	ext{Step 1: } & \text{state assumptions and definitions} && \text{set the starting point} \\
-	ext{Step 2: } & \text{derive the key relation} && ${correction} \\
-	ext{Step 3: } & \text{conclude the proof} && ${tailComment}
+  ext{Claim: } & ${String(concept || topic || 'the result')} && \text{state the goal} \\
+  ext{Step 1: } & \text{state assumptions and definitions} && \text{set the starting point} \\
+  ext{Step 2: } & \text{derive the key relation} && ${correction} \\
+  ext{Step 3: } & \text{conclude the proof} && ${tailComment}
 \end{aligned}`;
 }
 
 function enforceVisualCyclePolicy(slide, context = {}) {
   if (!slide || !Array.isArray(slide.components)) return;
   if (context.imageDensity === 'text-only') return;
-
-  // Keep generated slides text-first when the requested output should not include charts or SVG.
-  slide.components = Array.isArray(slide.components)
-    ? slide.components.filter(c => c && c.type !== 'svg' && c.type !== 'image')
-    : slide.components;
 }
 
 // Generate one image. Prefers an OpenAI-compatible provider, else Gemini's image model.
@@ -2235,6 +2315,8 @@ Rules:
 app.post('/api/ai/slide', auth, async (req, res) => {
   const { gameId, topic, concept, level, settings = {}, slideNumber, totalSlides, history = [], branch } = req.body || {};
   if (!topic || !concept || !slideNumber || !totalSlides) return res.status(400).json({ error: 'Missing slide context' });
+  const learnerGames = await recentUserGames(req.user.username, 20);
+  const learnerProfile = summarizeLearnerVisualProfile(learnerGames);
 
   const paragraphWords = { brief: '40-60', medium: '70-100', detailed: '110-150' }[settings.paragraphLength] || '70-100';
   const paraCount = Math.min(7, Math.max(1, parseInt(settings.paragraphCount, 10) || 3));
@@ -2247,9 +2329,18 @@ app.post('/api/ai/slide', auth, async (req, res) => {
   const allowModelSvg = !imageEnabled && !claudeSvgEnabled;
   const isTimeTravelActivity = settings.activityType === 'time-travel' || /time\s*travel|\bfuture\b|\bpast\b|\bpresent\b|headline|news/i.test(`${topic} ${concept} ${settings.customInstructions || ''}`);
   const proofMode = String(settings.exampleType || '').toLowerCase() === 'proof';
-  const canGenerateImage = true;
   const stemFocus = /math|physics|program|algorithm|computer|data|statistics|calculus|algebra|geometry|numerical|machine learning|ai|engineering|cryptography|proof|equation|formula|theorem|derivative|integral|linear algebra|probability/i
     .test(`${topic} ${concept}`);
+  const visualPlan = decideAdaptiveVisualMode({
+    topic,
+    concept,
+    settings,
+    proofMode,
+    isTimeTravelActivity,
+    stemFocus,
+    learnerProfile
+  });
+  const canGenerateImage = visualPlan.allowImages;
   const equationDepth = {
     brief: 'Use 1 compact but meaningful derivation/proof block with 2-4 lines.',
     medium: 'Use a moderately detailed derivation/proof with 4-7 lines and at least one intermediate step.',
@@ -2277,7 +2368,7 @@ app.post('/api/ai/slide', auth, async (req, res) => {
    {"type":"latex","content":string (a DISPLAY formula in LaTeX, WITHOUT surrounding $),"caption":string} |
    {"type":"code","language":string,"content":string (a real, correct, well-formatted snippet with newlines)} |
   {"type":"svg","svg":"<svg...>","caption":string} |
-  {"type":"table","headers":[string,...],"rows":[[string,...],...],"caption":string}
+  {"type":"image","prompt":string,"caption":string,"frame":"paper"|"polaroid"}
  ],
  "quiz": {
    "question": string,
@@ -2297,15 +2388,16 @@ Rules:
 - If a code snippet is included: ${codeDepth} Include clear inline comments that explain non-obvious lines and decisions.
 - If a LaTeX formula/proof block is included: ${equationDepth} Follow it with explanatory text that walks through the symbols and logic step-by-step.
 - If a LaTeX formula/proof block is included: ${equationDepth} Put the whole proof on the same slide in one displayed block when possible. Use short comments on the right of each line with aligned LaTeX, not separate captions or paragraphs that compete with the formula.
-- If a LaTeX formula/proof block is included: ${equationDepth} Put the whole proof on the same slide in one displayed block when possible. Use short comments on the right of each line with aligned LaTeX, not separate captions or paragraphs that compete with the formula.
 - If the concept is mathematical or another topic where symbols clarify the reasoning, prefer a displayed LaTeX derivation even if the example is not explicitly a formal proof.
+- IMAGE POLICY (adaptive): ${visualPlan.promptRule}
+- If including an image component, use a precise educational prompt that names the concept and the exact element to visualize. Avoid decorative prompts.
 - Any formula/proof/code explanation should be as substantial as the selected paragraph length setting; avoid tiny token examples for long-form settings.
 - ${stemFocus ? `${stemAlternation} For this STEM-heavy concept, include either a code snippet or a LaTeX formula/proof block, plus textual explanation tying them together. If the topic naturally benefits from symbolic math, prefer a proof/derivation page.` : 'Use STEM-style formula/code components only when they naturally fit the concept.'}
 - ${proofMode ? 'PROOF MODE: every slide must contain at least one displayed LaTeX proof or derivation block. Do not summarize the proof in prose only. Continue the derivation from the previous slide, and if the learner was wrong, repair the missing step explicitly.' : ''}
 - ${isTimeTravelActivity
   ? 'This is a Time Travel activity slide: keep the explanation timeline-aware and use a table only if it genuinely clarifies the progression.'
   : "For non-time-travel activities, keep the explanation tied to the concept and the learner's previous answer."}
-- For this deployment, NEVER emit image or svg components.
+- ${allowModelSvg ? 'SVG is allowed when it is the clearest explanatory visual.' : 'Prefer image prompts over SVG when a pictorial explanation is better.'}
 - Tone/sentiment of all writing: ${settings.tone || 'friendly lecture'}. Complexity of language: ${settings.complexity || 'standard'}. Audience level: ${level}.
 ${settings.language ? `- Write ALL text (including quiz and explanations) in ${settings.language}.\n` : ''}${settings.audience ? `- The reader is: ${settings.audience}. Pitch every explanation to them.\n` : ''}${settings.customInstructions ? `- Extra author instructions from the learner (follow them where they don't conflict with the schema): ${settings.customInstructions}\n` : ''}
 - The ${paraCount} substantive paragraph(s) are required every time, alongside any optional table.
@@ -2326,9 +2418,24 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
   if (!geminiEnabled && !deepseekEnabled) {
     const slide = makeFallbackSlide({ topic, concept, level, settings, slideNumber, totalSlides, branch });
     slide.components = sanitizeComponents(slide.components);
-    slide.components = (slide.components || []).filter(c => c?.type !== 'image' && c?.type !== 'svg');
+    if (isTimeTravelActivity && visualPlan.allowImages) {
+      enforceTimeTravelImagePolicy(slide, { topic, concept, slideNumber, totalSlides, customInstructions: settings.customInstructions || '' });
+    } else if (visualPlan.allowImages && !slide.components.some(c => c?.type === 'image')) {
+      slide.components.push({
+        type: 'image',
+        prompt: buildGenericImagePrompt(slide, { topic, concept, slideNumber, totalSlides }),
+        frame: slideNumber % 2 === 0 ? 'polaroid' : 'paper',
+        caption: `Concept illustration: ${String(slide.title || concept).slice(0, 80)}`
+      });
+    }
     if (settings.imageDensity === 'text-only') {
       slide.components = (slide.components || []).filter(c => !['svg', 'image', 'latex', 'code', 'table'].includes(c.type));
+    }
+    if (!visualPlan.allowImages) {
+      slide.components = (slide.components || []).filter(c => c?.type !== 'image' && c?.type !== 'svg');
+    }
+    if (visualPlan.allowImages) {
+      await fillImages(slide.components || []);
     }
     enforceSlideVisualPolicy(slide, history, slideNumber);
     const genId = `${gameId || 'nogame'}-slide${slideNumber}-fallback`;
@@ -2352,7 +2459,19 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
   try {
     const slide = await generateStructured([{ role: 'system', content: system }, { role: 'user', content: user }], { temperature: 0.85, maxTokens: 8192 });
     slide.components = sanitizeComponents(slide.components);
-    slide.components = (slide.components || []).filter(c => c?.type !== 'image' && c?.type !== 'svg');
+    if (!visualPlan.allowImages) {
+      slide.components = (slide.components || []).filter(c => c?.type !== 'image' && c?.type !== 'svg');
+    }
+    if (isTimeTravelActivity && visualPlan.allowImages) {
+      enforceTimeTravelImagePolicy(slide, { topic, concept, slideNumber, totalSlides, customInstructions: settings.customInstructions || '' });
+    } else if (visualPlan.allowImages && !slide.components.some(c => c?.type === 'image')) {
+      slide.components.push({
+        type: 'image',
+        prompt: buildGenericImagePrompt(slide, { topic, concept, slideNumber, totalSlides }),
+        frame: slideNumber % 2 === 0 ? 'polaroid' : 'paper',
+        caption: `Concept illustration: ${String(slide.title || concept).slice(0, 80)}`
+      });
+    }
     if (settings.imageDensity === 'text-only' && !proofMode) {
       slide.components = slide.components.filter(c => !['latex', 'code', 'table'].includes(c.type));
     }
@@ -2362,6 +2481,9 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
         content: makeFallbackProofLatex({ topic, concept, slideNumber, branch }),
         caption: `Proof step ${slideNumber}: ${String(concept || topic || 'Concept').trim().split(/\s+/).slice(0, 8).join(' ')}`
       });
+    }
+    if (visualPlan.allowImages) {
+      await fillImages(slide.components || []);
     }
     enforceSlideVisualPolicy(slide, history, slideNumber);
     if (!slide.quiz || !Array.isArray(slide.quiz.options) || !slide.quiz.options.some(o => o.correct)) {

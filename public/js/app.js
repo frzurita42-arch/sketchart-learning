@@ -1199,9 +1199,9 @@ function buildTimeTravelImageDataUrl(slide, game) {
 }
 
 function enforceGraphOnlyClient(slide, game) {
-  if (game?.settings?.imageDensity === 'text-only') return slide;
+  if (game?.settings?.imageDensity !== 'text-only') return slide;
   const comps = Array.isArray(slide?.components) ? slide.components : [];
-  slide.components = comps.filter(c => c?.type !== 'svg' && c?.type !== 'image');
+  slide.components = comps.filter(c => !['svg', 'image', 'latex', 'code', 'table'].includes(c?.type));
   return slide;
 }
 
