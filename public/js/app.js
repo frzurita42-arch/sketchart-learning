@@ -113,11 +113,16 @@ function viewHome() {
   $app.innerHTML = `
     <h1 class="view-title">What do you want to <span class="scribble-underline">learn</span> today?</h1>
     <p class="view-sub">Pick a subject, or write your own.</p>
-    <div class="slide-actions" style="justify-content:center;margin-bottom:10px">
-      <button class="btn small blue" id="refresh-home-topics">↻ Refresh 12 topic ideas</button>
+    <div style="max-width:560px;margin:18px auto 0">
+      <h4 style="margin:0 0 6px;opacity:.9">Start a Learning path</h4>
     </div>
-    <div class="chip-row">${state.homeTopics.map(t => `<button class="chip" data-topic="${esc(t)}">${esc(t)}</button>`).join('')}</div>
-    <div class="card alt" style="max-width:560px;margin:26px auto 0">
+    <div style="max-width:860px;margin:14px auto 0">
+      <div class="slide-actions" style="justify-content:center;margin-bottom:10px">
+        <button class="btn small blue" id="refresh-home-topics">↻ Refresh 12 topic ideas</button>
+      </div>
+      <div class="chip-row">${state.homeTopics.map(t => `<button class="chip" data-topic="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+    </div>
+    <div class="card alt" style="max-width:560px;margin:16px auto 0">
       <label class="field"><span>…or a custom topic</span>
         <input type="text" id="custom-topic" placeholder="e.g. Renaissance art, Rust programming, beekeeping…" /></label>
       <button class="btn primary" id="custom-topic-btn">Draw my path →</button>
@@ -158,11 +163,16 @@ function viewHomeWithCurrentTopics() {
   $app.innerHTML = `
     <h1 class="view-title">What do you want to <span class="scribble-underline">learn</span> today?</h1>
     <p class="view-sub">Pick a subject, or write your own.</p>
-    <div class="slide-actions" style="justify-content:center;margin-bottom:10px">
-      <button class="btn small blue" id="refresh-home-topics">↻ Refresh 12 topic ideas</button>
+    <div style="max-width:560px;margin:18px auto 0">
+      <h4 style="margin:0 0 6px;opacity:.9">Start a Learning path</h4>
     </div>
-    <div class="chip-row">${state.homeTopics.map(t => `<button class="chip" data-topic="${esc(t)}">${esc(t)}</button>`).join('')}</div>
-    <div class="card alt" style="max-width:560px;margin:26px auto 0">
+    <div style="max-width:860px;margin:14px auto 0">
+      <div class="slide-actions" style="justify-content:center;margin-bottom:10px">
+        <button class="btn small blue" id="refresh-home-topics">↻ Refresh 12 topic ideas</button>
+      </div>
+      <div class="chip-row">${state.homeTopics.map(t => `<button class="chip" data-topic="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+    </div>
+    <div class="card alt" style="max-width:560px;margin:16px auto 0">
       <label class="field"><span>…or a custom topic</span>
         <input type="text" id="custom-topic" placeholder="e.g. Renaissance art, Rust programming, beekeeping…" /></label>
       <button class="btn primary" id="custom-topic-btn">Draw my path →</button>
