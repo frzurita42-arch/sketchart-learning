@@ -1484,6 +1484,81 @@ function enforceTimeTravelImagePolicy(slide, context = {}) {
   slide.components = nonVisual;
 }
 
+function buildGenericImagePrompt(slide, context = {}) {
+  const texts = (Array.isArray(slide?.components) ? slide.components : [])
+    .filter(c => c?.type === 'text')
+    .map(c => String(c.content || '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(' ');
+  return [
+    'NANO BANANA style educational illustration.',
+    `Topic: ${context.topic || ''}. Concept: ${context.concept || ''}.`,
+    `Slide ${context.slideNumber || 1} of ${context.totalSlides || '?'}.`,
+    `Title: ${String(slide?.title || '').trim()}. Summary: ${String(slide?.summary || '').trim()}.`,
+    `Key content: ${texts.slice(0, 600)}`,
+    'Make this image unique vs previous slides and directly useful for answering the quiz.',
+    'High clarity, no logos, no text overlays.'
+  ].join(' ');
+}
+
+function makeFallbackTable(slide, context = {}) {
+  const title = String(slide?.title || context.concept || 'Concept').trim();
+  const quiz = String(slide?.quiz?.question || 'How do we evaluate this concept?').trim();
+  return {
+    type: 'table',
+    headers: ['Dimension', 'Observation', 'Implication'],
+    rows: [
+      ['Core mechanism', title, `Slide ${context.slideNumber || 1} focus`],
+      ['Decision signal', quiz.slice(0, 40), 'Use evidence, not guesswork'],
+      ['Trade-off', 'Speed vs accuracy', 'Choose based on constraints']
+    ],
+    caption: `Slide ${context.slideNumber || 1} comparison table`
+  };
+}
+
+function makeFallbackGraphSvg(slide, context = {}) {
+  const seed = Number(context.slideNumber || 1);
+  const p1 = 170 - (seed % 3) * 20;
+  const p2 = 130 + (seed % 4) * 15;
+  const p3 = 95 + (seed % 5) * 10;
+  return {
+    type: 'svg',
+    caption: `Slide ${seed} trend graph: ${String(slide?.title || context.concept || 'concept').trim()}`,
+    svg: `<svg viewBox="0 0 420 240" xmlns="http://www.w3.org/2000/svg"><rect x="36" y="24" width="352" height="176" fill="#f7f3e9" stroke="#2d2a26" stroke-width="2.5"/><line x1="64" y1="176" x2="360" y2="176" stroke="#2d2a26" stroke-width="2.5"/><line x1="64" y1="176" x2="64" y2="48" stroke="#2d2a26" stroke-width="2.5"/><polyline points="64,${p1} 170,${p2} 280,${p3} 360,78" fill="none" stroke="#5c80bc" stroke-width="3.5"/><circle cx="64" cy="${p1}" r="5" fill="#5c80bc"/><circle cx="170" cy="${p2}" r="5" fill="#5c80bc"/><circle cx="280" cy="${p3}" r="5" fill="#5c80bc"/><circle cx="360" cy="78" r="5" fill="#5c80bc"/><text x="70" y="212" font-size="14" fill="#2d2a26">Stage 1</text><text x="168" y="212" font-size="14" fill="#2d2a26">Stage 2</text><text x="278" y="212" font-size="14" fill="#2d2a26">Stage 3</text><text x="330" y="44" font-size="14" fill="#2d2a26">Trend</text></svg>`
+  };
+}
+
+function enforceVisualCyclePolicy(slide, context = {}) {
+  if (!slide || !Array.isArray(slide.components)) return;
+  if (context.imageDensity === 'text-only') return;
+
+  const visualTypes = new Set(['table', 'svg', 'image', 'latex', 'code']);
+  const nonVisual = slide.components.filter(c => !visualTypes.has(c?.type));
+  const cycle = context.isTimeTravel
+    ? 'image'
+    : ['image', 'table', 'svg'][(Math.max(1, Number(context.slideNumber || 1)) - 1) % 3];
+
+  let visual = null;
+  if (cycle === 'image') {
+    visual = {
+      type: 'image',
+      prompt: buildGenericImagePrompt(slide, context),
+      frame: Number(context.slideNumber || 1) % 2 === 0 ? 'polaroid' : 'paper',
+      caption: `${context.isTimeTravel ? 'Time Travel' : 'Learning'} image: Slide ${context.slideNumber || 1} - ${String(slide.title || context.concept || 'concept').trim()}`
+    };
+  } else if (cycle === 'table') {
+    visual = makeFallbackTable(slide, context);
+  } else {
+    visual = makeFallbackGraphSvg(slide, context);
+  }
+
+  const insertAt = nonVisual.findIndex(c => c?.type === 'text');
+  if (insertAt >= 0) nonVisual.splice(insertAt + 1, 0, visual);
+  else nonVisual.unshift(visual);
+  slide.components = nonVisual;
+}
+
 // Generate one image. Prefers an OpenAI-compatible provider, else Gemini's image model.
 async function generateImage(prompt) {
   if (IMAGE_API_KEY) {
@@ -2219,16 +2294,16 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
   if (!geminiEnabled && !deepseekEnabled) {
     const slide = makeFallbackSlide({ topic, concept, level, settings, slideNumber, totalSlides, branch });
     slide.components = sanitizeComponents(slide.components);
-    if (isTimeTravelActivity && settings.imageDensity !== 'text-only') {
-      enforceTimeTravelImagePolicy(slide, {
-        topic,
-        concept,
-        slideNumber,
-        totalSlides,
-        customInstructions: settings.customInstructions || ''
-      });
-      slide.components = await fillImages(slide.components);
-    }
+    enforceVisualCyclePolicy(slide, {
+      topic,
+      concept,
+      slideNumber,
+      totalSlides,
+      imageDensity: settings.imageDensity,
+      isTimeTravel: isTimeTravelActivity,
+      customInstructions: settings.customInstructions || ''
+    });
+    slide.components = await fillImages(slide.components);
     if (settings.imageDensity === 'text-only') {
       slide.components = (slide.components || []).filter(c => !['svg', 'image', 'latex', 'code', 'table'].includes(c.type));
     }
@@ -2254,15 +2329,15 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
   try {
     const slide = await generateStructured([{ role: 'system', content: system }, { role: 'user', content: user }], { temperature: 0.85, maxTokens: 8192 });
     slide.components = sanitizeComponents(slide.components);
-    if (isTimeTravelActivity && settings.imageDensity !== 'text-only') {
-      enforceTimeTravelImagePolicy(slide, {
-        topic,
-        concept,
-        slideNumber,
-        totalSlides,
-        customInstructions: settings.customInstructions || ''
-      });
-    }
+    enforceVisualCyclePolicy(slide, {
+      topic,
+      concept,
+      slideNumber,
+      totalSlides,
+      imageDensity: settings.imageDensity,
+      isTimeTravel: isTimeTravelActivity,
+      customInstructions: settings.customInstructions || ''
+    });
     slide.components = await fillImages(slide.components); // generate any requested images (no-op without an image key)
     // Have Claude draw this slide's diagram, contextual to concept/level/progress
     // (unless the learner chose text-only). No-op without an Anthropic key.
@@ -2270,8 +2345,8 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
       // enforce text-only regardless of what the model emitted
       slide.components = slide.components.filter(c => !['svg', 'image', 'latex', 'code', 'table'].includes(c.type));
     } else {
-      // Time Travel now uses generated images as the primary visual; do not replace with SVG.
-      if (!isTimeTravelActivity) {
+      // Keep image/table graph cycle intact; only use Claude when svg is the chosen visual.
+      if (!isTimeTravelActivity && slide.components.some(c => c?.type === 'svg')) {
         await illustrateWithClaude(slide, { topic, concept, level, history });
       }
     }
