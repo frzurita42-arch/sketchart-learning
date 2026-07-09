@@ -1368,7 +1368,9 @@ function enforceSlideVisualPolicy(slide, history = [], slideNumber = 1) {
 
   const sig = componentVisualSignature(oneVisual).toLowerCase();
   const sigCanonical = normalizeSig(sig);
-  if (!sig || !previousCanonical.has(sigCanonical)) return;
+  const repeatProneType = ['table', 'svg'].includes(String(oneVisual.type || '').toLowerCase())
+    && previousTypes.has(String(oneVisual.type || '').toLowerCase());
+  if (!sig || (!previousCanonical.has(sigCanonical) && !repeatProneType)) return;
 
   const titleSeed = String(slide.title || 'this concept').trim();
   const quizSeed = String(slide?.quiz?.question || '').trim().slice(0, 90);
