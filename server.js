@@ -1166,13 +1166,13 @@ function makeFallbackSlide({ topic, concept, level, settings = {}, slideNumber, 
     if (slideNumber % 2 === 0) {
       components.push({
         type: 'table',
-        headers: ['Dimension', 'Past', 'Present', 'Future'],
+        headers: ['Main idea', 'Different perspective'],
         rows: [
-          ['Main pressure', 'Resource scarcity', 'Infrastructure strain', 'Interplanetary coordination'],
-          ['Decision lens', 'Stability first', 'Risk balancing', 'Long-horizon resilience'],
-          ['Best metric', 'Survival rate', 'Service reliability', `Treaty compliance (slide ${slideNumber})`]
+          ['Main pressure', 'How the same problem looks in a new era'],
+          ['Decision lens', 'What changes when the context shifts'],
+          ['Best metric', `What evidence still matters on slide ${slideNumber}`]
         ],
-        caption: `Time-travel comparison frame for slide ${slideNumber}`
+        caption: `Time-travel main idea vs perspective frame for slide ${slideNumber}`
       });
     } else {
       components.push({
