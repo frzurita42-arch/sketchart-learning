@@ -1466,7 +1466,7 @@ function enforceTimeTravelImagePolicy(slide, context = {}) {
     type: 'image',
     prompt: imagePrompt,
     frame: context.slideNumber % 2 === 0 ? 'polaroid' : 'paper',
-    caption: `${String((inferTimeEraHint(imagePrompt) || 'present')).toUpperCase()} scene: ${String(slide.title || context.concept || 'Time Travel concept').trim()}`
+    caption: `${String((inferTimeEraHint(imagePrompt) || 'present')).toUpperCase()} scene: Slide ${context.slideNumber || 1} - ${String(slide.title || context.concept || 'Time Travel concept').trim()}`
   };
 
   // Keep exactly one primary visual for Time Travel: the generated image.
@@ -1550,6 +1550,18 @@ function fallbackImageDataUrl(prompt = '', caption = '') {
   const h3 = 140 + ((hash >> 5) % 200);
   const c1 = 700 - ((hash >> 2) % 100);
   const c2 = 690 - ((hash >> 4) % 100);
+    const variant = hash % 3;
+    const scene = variant === 0
+     ? `<circle cx="180" cy="390" r="42" fill="${palette.accent}" opacity="0.35"/>
+       <circle cx="270" cy="360" r="26" fill="${palette.accent}" opacity="0.2"/>
+       <path d="M120 830 L260 690 L380 830" />`
+     : variant === 1
+      ? `<path d="M120 380 L420 300 L760 430" />
+        <path d="M120 430 L420 350 L760 480" opacity="0.7"/>
+        <rect x="760" y="300" width="110" height="80" rx="10" fill="${palette.accent}" opacity="0.25"/>`
+      : `<rect x="120" y="330" width="90" height="90" rx="8" fill="${palette.accent}" opacity="0.26"/>
+        <rect x="235" y="360" width="90" height="90" rx="8" fill="${palette.accent}" opacity="0.2"/>
+        <rect x="350" y="330" width="90" height="90" rx="8" fill="${palette.accent}" opacity="0.26"/>`;
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="${a}">
   <defs>
@@ -1564,6 +1576,7 @@ function fallbackImageDataUrl(prompt = '', caption = '') {
   <text x="84" y="196" font-family="Georgia, serif" font-size="34" fill="${palette.ink}">${a}</text>
   <text x="84" y="252" font-family="Arial, sans-serif" font-size="24" fill="${palette.ink}">${b}</text>
   <text x="84" y="290" font-family="Arial, sans-serif" font-size="24" fill="${palette.ink}">${c}</text>
+  <g stroke="${palette.ink}" stroke-width="7" fill="none" opacity="0.85">${scene}</g>
   <g stroke="${palette.ink}" stroke-width="8" fill="none" opacity="0.9">
     <path d="M110 ${c1} C 250 ${c1 - 120}, 380 ${c1 - 110}, 520 ${c1}"/>
     <path d="M500 ${c2} C 640 ${c2 - 120}, 760 ${c2 - 110}, 900 ${c2}"/>
