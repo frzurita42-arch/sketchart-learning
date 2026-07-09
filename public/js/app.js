@@ -256,6 +256,11 @@ async function refreshHomeTopics({ silent = false, forceRefresh = false } = {}) 
   }
 }
 
+// A small wood-plank banner with the activity's how-to, shown under its title.
+function renderInstructionPlank(html) {
+  return `<div class="instruction-plank"><p>${html}</p></div>`;
+}
+
 function renderHomeFeed() {
   const sections = shuffled([
     renderLearningPathSection(),
@@ -270,6 +275,7 @@ function renderLearningPathSection() {
   return `
     <section style="max-width:860px;margin:18px auto 0">
       <h4 class="activity-heading" style="margin:0 0 6px;opacity:.9;max-width:760px">Start a Learning path</h4>
+      ${renderInstructionPlank('Type a topic or tap one below — I sketch a full, playable lesson path for it.')}
       <div class="card alt" style="max-width:560px;margin:12px auto 0">
         <label class="field"><span>Type a topic to learn</span>
           <input type="text" id="custom-topic" placeholder="e.g. Renaissance art, Rust programming, beekeeping…" /></label>
@@ -305,6 +311,7 @@ function renderSuggestedTopicSection() {
   return `
     <section style="max-width:760px;margin:36px auto 0">
       <h4 class="activity-heading" style="margin:0 0 2px;opacity:.9">Suggested topic</h4>
+      ${renderInstructionPlank('A topic picked from your history. Refresh for another, or press play to start.')}
       <div class="card" style="max-width:760px;margin:0 auto 0;padding:14px 16px">
       <div class="slide-actions" style="justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
         ${hasSuggestion ? `<p style="margin:0;font-weight:700">${esc(s.topic)}</p>` : ''}
@@ -332,6 +339,7 @@ function renderTimeTravelActivitySection() {
   return `
       <section style="max-width:760px;margin:24px auto 0">
       <h4 class="activity-heading" style="margin:0 0 6px;opacity:.9">Time Travel Activity</h4>
+      ${renderInstructionPlank('Set an era and a headline — it becomes a playable news story lesson with quizzes.')}
       <div class="card alt" style="max-width:760px;margin:0 auto 0;padding:14px 16px">
         <div class="slide-actions" style="justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">
           <span style="font-weight:600">Custom headline</span>
@@ -388,7 +396,7 @@ function renderStructuredExplanationsSection() {
   return `
       <section style="max-width:760px;margin:24px auto 0">
         <h4 class="activity-heading" style="margin:0 0 6px;opacity:.9">Structured Explanations</h4>
-      
+      ${renderInstructionPlank('Name a formula or concept — get a step-by-step proof or worked example as playable slides.')}
       <div class="card alt" style="max-width:760px;margin:0 auto 0;padding:14px 16px">
         <div class="slide-actions" style="justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">
           <span style="font-weight:600">Formula, concept, or example type</span>
