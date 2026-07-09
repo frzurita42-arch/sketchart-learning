@@ -1333,7 +1333,7 @@ function componentVisualSignature(component) {
 }
 
 function enforceSlideVisualPolicy(slide, history = [], slideNumber = 1) {
-  const visualTypes = new Set(['table', 'svg', 'image', 'latex', 'code']);
+  const visualTypes = new Set(['table']);
   const normalizeSig = (value) => String(value || '')
     .toLowerCase()
     .replace(/slide\s*\d+/g, 'slide')
@@ -1393,22 +1393,6 @@ function enforceSlideVisualPolicy(slide, history = [], slideNumber = 1) {
       oneVisual.headers = ['Scenario', 'Signal', 'Trade-off', 'Decision'].slice(0, width);
     }
     oneVisual.caption = `Slide ${slideNumber}: ${String(oneVisual.caption || 'comparison table').trim()}`;
-    return;
-  }
-  if (oneVisual.type === 'svg') {
-    oneVisual.caption = `Slide ${slideNumber}: ${titleSeed}${quizSeed ? ` - ${quizSeed}` : ''}`;
-    if (typeof oneVisual.svg === 'string' && oneVisual.svg.includes('<svg')) {
-      oneVisual.svg = oneVisual.svg
-        .replace(/<svg\b/, `<svg data-slide="${slideNumber}"`)
-        .replace(/<svg[^>]*>/, (m) => `${m}<text x="12" y="18" font-size="12" fill="#111">S${slideNumber}</text>`);
-    }
-    return;
-  }
-  if (oneVisual.type === 'image') {
-    oneVisual.caption = `Slide ${slideNumber}: ${String(oneVisual.caption || 'Illustration').trim()}`;
-    const seedPrompt = `Slide ${slideNumber} focus. ${String(oneVisual.prompt || oneVisual.caption || slide.title || 'time travel concept').trim()}`;
-    oneVisual.prompt = seedPrompt;
-    oneVisual.url = fallbackImageDataUrl(seedPrompt, oneVisual.caption);
     return;
   }
   if (oneVisual.type === 'latex') {
@@ -1505,27 +1489,16 @@ function buildGenericImagePrompt(slide, context = {}) {
 function makeFallbackTable(slide, context = {}) {
   const title = String(slide?.title || context.concept || 'Concept').trim();
   const quiz = String(slide?.quiz?.question || 'How do we evaluate this concept?').trim();
+  const topic = String(context.topic || slide?.summary || 'Topic').trim();
   return {
     type: 'table',
-    headers: ['Dimension', 'Observation', 'Implication'],
+    headers: ['Category', 'What it shows', 'Why it matters'],
     rows: [
-      ['Core mechanism', title, `Slide ${context.slideNumber || 1} focus`],
-      ['Decision signal', quiz.slice(0, 40), 'Use evidence, not guesswork'],
-      ['Trade-off', 'Speed vs accuracy', 'Choose based on constraints']
+      [topic.slice(0, 28), title.slice(0, 30), `Slide ${context.slideNumber || 1} focus`],
+      ['Key question', quiz.slice(0, 30), 'Use the slide evidence to answer it'],
+      ['Practical takeaway', String(slide?.summary || '').slice(0, 30), 'This is what the learner should remember']
     ],
     caption: `Slide ${context.slideNumber || 1} comparison table`
-  };
-}
-
-function makeFallbackGraphSvg(slide, context = {}) {
-  const seed = Number(context.slideNumber || 1);
-  const p1 = 170 - (seed % 3) * 20;
-  const p2 = 130 + (seed % 4) * 15;
-  const p3 = 95 + (seed % 5) * 10;
-  return {
-    type: 'svg',
-    caption: `Slide ${seed} trend graph: ${String(slide?.title || context.concept || 'concept').trim()}`,
-    svg: `<svg viewBox="0 0 420 240" xmlns="http://www.w3.org/2000/svg"><rect x="36" y="24" width="352" height="176" fill="#f7f3e9" stroke="#2d2a26" stroke-width="2.5"/><line x1="64" y1="176" x2="360" y2="176" stroke="#2d2a26" stroke-width="2.5"/><line x1="64" y1="176" x2="64" y2="48" stroke="#2d2a26" stroke-width="2.5"/><polyline points="64,${p1} 170,${p2} 280,${p3} 360,78" fill="none" stroke="#5c80bc" stroke-width="3.5"/><circle cx="64" cy="${p1}" r="5" fill="#5c80bc"/><circle cx="170" cy="${p2}" r="5" fill="#5c80bc"/><circle cx="280" cy="${p3}" r="5" fill="#5c80bc"/><circle cx="360" cy="78" r="5" fill="#5c80bc"/><text x="70" y="212" font-size="14" fill="#2d2a26">Stage 1</text><text x="168" y="212" font-size="14" fill="#2d2a26">Stage 2</text><text x="278" y="212" font-size="14" fill="#2d2a26">Stage 3</text><text x="330" y="44" font-size="14" fill="#2d2a26">Trend</text></svg>`
   };
 }
 
@@ -1533,21 +1506,10 @@ function enforceVisualCyclePolicy(slide, context = {}) {
   if (!slide || !Array.isArray(slide.components)) return;
   if (context.imageDensity === 'text-only') return;
 
-  const visualTypes = new Set(['table', 'svg', 'image', 'latex', 'code']);
-  const nonVisual = slide.components.filter(c => !visualTypes.has(c?.type));
-  const cycle = (Math.max(1, Number(context.slideNumber || 1)) % 2 === 0) ? 'table' : 'svg';
-
-  let visual = null;
-  if (cycle === 'table') {
-    visual = makeFallbackTable(slide, context);
-  } else {
-    visual = makeFallbackGraphSvg(slide, context);
-  }
-
-  const insertAt = nonVisual.findIndex(c => c?.type === 'text');
-  if (insertAt >= 0) nonVisual.splice(insertAt + 1, 0, visual);
-  else nonVisual.unshift(visual);
-  slide.components = nonVisual;
+  // Keep generated slides text-first when the requested output should not include charts or SVG.
+  slide.components = Array.isArray(slide.components)
+    ? slide.components.filter(c => c && c.type !== 'svg' && c.type !== 'image')
+    : slide.components;
 }
 
 // Generate one image. Prefers an OpenAI-compatible provider, else Gemini's image model.
@@ -2194,9 +2156,6 @@ app.post('/api/ai/slide', auth, async (req, res) => {
     'mostly-visual': `Lead with 1-2 visual components that dominate the slide, but STILL include at least TWO connected paragraphs (each ${paragraphWords} words) explaining them.`
   }[settings.imageDensity] || 'Include one visual component alongside the paragraphs.';
   const allowModelSvg = !imageEnabled && !claudeSvgEnabled;
-  const visualMenu = allowModelSvg
-    ? 'a compact table, or a labelled svg graph/diagram'
-    : 'a compact table, or a graph/diagram (svg generated in post-processing)';
   const isTimeTravelActivity = settings.activityType === 'time-travel' || /time\s*travel|\bfuture\b|\bpast\b|\bpresent\b|headline|news/i.test(`${topic} ${concept} ${settings.customInstructions || ''}`);
   const canGenerateImage = true;
   const stemFocus = /math|physics|program|algorithm|computer|data|statistics|calculus|algebra|geometry|numerical|machine learning|ai|engineering|cryptography|proof|equation|formula|theorem|derivative|integral|linear algebra|probability/i
@@ -2241,24 +2200,21 @@ Rules:
 - Exactly 4 quiz options, exactly ONE with "correct": true, shuffled position.
 - Make the quiz genuinely CHALLENGING, not obvious: every option must be on-topic and plausible to someone who only half-understood the slide. Never make the correct answer the conspicuously longest or most detailed, and never make wrong options absurd or off-topic. Each wrong option is a common, tempting mistake that reveals a DIFFERENT misconception. A careless reader should be able to fall for a distractor; only careful reasoning from the slide's paragraphs should yield the right answer.
 - LENGTH: the slide MUST contain exactly ${paraCount} distinct paragraph(s) of prose (as separate "text" components), each about ${paragraphWords} words. Do not collapse them, and do not pad — each paragraph carries new substance. ${densityRule}
-- VISUAL COUNT: include AT MOST ONE primary visual component on this slide from [table, svg, image, latex, code]. Never include more than one of these in the same slide.
 - COHESION: the paragraphs must build on one another in order — introduce the idea, develop it, then apply or consolidate it — never restating the same point. The slide must also connect to the previous slides (briefly recall or build on them) and set up what comes next, so the whole presentation reads as one continuous, complementary lesson rather than isolated cards.
-- VISUALS: pick the visual that BEST fits this slide and make it ACCURATELY represent what the paragraphs say — never a generic or decorative figure (no meaningless Venn diagrams, plain squares, or random shapes). Use only TABLES or SVG graphs/diagrams for this deployment. Vary table vs svg across consecutive slides and keep exactly one primary visual component.
 - TABLES: when using a table, keep it compact (3-6 rows, 2-6 columns), label headers clearly, and ensure every row directly supports the slide's teaching point.
-- UNIQUENESS: do not reuse the same visual from previous slides in this activity. Create a new visual tailored to THIS slide only.
-- QUIZ ALIGNMENT: the visual must directly help answer this slide's multiple-choice question or explain one likely misconception.
+- QUIZ ALIGNMENT: if a table is included, it must directly help answer this slide's multiple-choice question or explain one likely misconception.
 - If a code snippet is included: ${codeDepth} Include clear inline comments that explain non-obvious lines and decisions.
 - If a LaTeX formula/proof block is included: ${equationDepth} Follow it with explanatory text that walks through the symbols and logic step-by-step.
 - Any formula/proof/code explanation should be as substantial as the selected paragraph length setting; avoid tiny token examples for long-form settings.
-- ${stemFocus ? `${stemAlternation} For this STEM-heavy concept, include both: (1) a visual component (image/svg when available) and (2) either a code snippet or a LaTeX formula/proof block, plus textual explanation tying them together.` : 'Use STEM-style formula/code components only when they naturally fit the concept.'}
+- ${stemFocus ? `${stemAlternation} For this STEM-heavy concept, include either a code snippet or a LaTeX formula/proof block, plus textual explanation tying them together.` : 'Use STEM-style formula/code components only when they naturally fit the concept.'}
 - ${isTimeTravelActivity
-    ? 'This is a Time Travel activity slide: use a timeline-focused TABLE or SVG graph only (no image generation).'
-    : 'For non-time-travel activities, use TABLE or SVG graph visuals only (no image generation).'}
-- For this deployment, NEVER emit image components.
+  ? 'This is a Time Travel activity slide: keep the explanation timeline-aware and use a table only if it genuinely clarifies the progression.'
+  : 'For non-time-travel activities, keep the explanation tied to the concept and the learner's previous answer.'}
+- For this deployment, NEVER emit image or svg components.
 - Tone/sentiment of all writing: ${settings.tone || 'friendly lecture'}. Complexity of language: ${settings.complexity || 'standard'}. Audience level: ${level}.
 ${settings.language ? `- Write ALL text (including quiz and explanations) in ${settings.language}.\n` : ''}${settings.audience ? `- The reader is: ${settings.audience}. Pitch every explanation to them.\n` : ''}${settings.customInstructions ? `- Extra author instructions from the learner (follow them where they don't conflict with the schema): ${settings.customInstructions}\n` : ''}
-- The ${paraCount} substantive paragraph(s) are required every time, alongside the chosen visual(s).
-- ${allowModelSvg ? SKETCH_SVG_RULES : 'IMPORTANT: do NOT emit any "svg" components for this slide.'}${claudeSvgEnabled ? `\n- IMPORTANT: do NOT emit any "svg" components. A dedicated illustrator will draw the diagram for this slide separately. You may still use latex and code components; just leave the sketch/diagram to the illustrator.` : ''}`;
+- The ${paraCount} substantive paragraph(s) are required every time, alongside any optional table.
+- Make the next slide depend on the previous answer: if the learner was wrong, explicitly explain the misconception and steer them back toward the right reasoning; if the learner was right, reinforce the idea from a different angle and continue forward.`;
 
   const historyText = history.length
     ? 'Slides so far:\n' + history.map((h, i) =>
@@ -2275,16 +2231,7 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
   if (!geminiEnabled && !deepseekEnabled) {
     const slide = makeFallbackSlide({ topic, concept, level, settings, slideNumber, totalSlides, branch });
     slide.components = sanitizeComponents(slide.components);
-    enforceVisualCyclePolicy(slide, {
-      topic,
-      concept,
-      slideNumber,
-      totalSlides,
-      imageDensity: settings.imageDensity,
-      isTimeTravel: isTimeTravelActivity,
-      customInstructions: settings.customInstructions || ''
-    });
-    slide.components = (slide.components || []).filter(c => c?.type !== 'image');
+    slide.components = (slide.components || []).filter(c => c?.type !== 'image' && c?.type !== 'svg');
     if (settings.imageDensity === 'text-only') {
       slide.components = (slide.components || []).filter(c => !['svg', 'image', 'latex', 'code', 'table'].includes(c.type));
     }
@@ -2310,26 +2257,9 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
   try {
     const slide = await generateStructured([{ role: 'system', content: system }, { role: 'user', content: user }], { temperature: 0.85, maxTokens: 8192 });
     slide.components = sanitizeComponents(slide.components);
-    enforceVisualCyclePolicy(slide, {
-      topic,
-      concept,
-      slideNumber,
-      totalSlides,
-      imageDensity: settings.imageDensity,
-      isTimeTravel: isTimeTravelActivity,
-      customInstructions: settings.customInstructions || ''
-    });
-    slide.components = (slide.components || []).filter(c => c?.type !== 'image');
-    // Have Claude draw this slide's diagram, contextual to concept/level/progress
-    // (unless the learner chose text-only). No-op without an Anthropic key.
+    slide.components = (slide.components || []).filter(c => c?.type !== 'image' && c?.type !== 'svg');
     if (settings.imageDensity === 'text-only') {
-      // enforce text-only regardless of what the model emitted
-      slide.components = slide.components.filter(c => !['svg', 'image', 'latex', 'code', 'table'].includes(c.type));
-    } else {
-      // Keep image/table graph cycle intact; only use Claude when svg is the chosen visual.
-      if (!isTimeTravelActivity && slide.components.some(c => c?.type === 'svg')) {
-        await illustrateWithClaude(slide, { topic, concept, level, history });
-      }
+      slide.components = slide.components.filter(c => !['latex', 'code', 'table'].includes(c.type));
     }
     enforceSlideVisualPolicy(slide, history, slideNumber);
     if (!slide.quiz || !Array.isArray(slide.quiz.options) || !slide.quiz.options.some(o => o.correct)) {

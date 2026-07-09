@@ -1198,36 +1198,7 @@ function buildTimeTravelImageDataUrl(slide, game) {
 function enforceGraphOnlyClient(slide, game) {
   if (game?.settings?.imageDensity === 'text-only') return slide;
   const comps = Array.isArray(slide?.components) ? slide.components : [];
-  const visuals = new Set(['table', 'svg', 'image', 'latex', 'code']);
-  const nonVisual = comps.filter(c => !visuals.has(c?.type));
-  let graph = comps.find(c => c?.type === 'table' || c?.type === 'svg');
-
-  if (!graph) {
-    const n = Number(game?.slideNumber || 1);
-    if (n % 2 === 0) {
-      graph = {
-        type: 'table',
-        headers: ['Dimension', 'Observation', 'Implication'],
-        rows: [
-          ['Core mechanism', String(slide?.title || game?.concept || 'Concept').slice(0, 40), `Slide ${n} focus`],
-          ['Decision signal', String(slide?.quiz?.question || 'Evaluate with evidence').slice(0, 40), 'Use constraints'],
-          ['Trade-off', 'Speed vs accuracy', 'Choose by context']
-        ],
-        caption: `Slide ${n} comparison table`
-      };
-    } else {
-      graph = {
-        type: 'svg',
-        caption: `Slide ${n} trend graph`,
-        svg: `<svg viewBox="0 0 420 240" xmlns="http://www.w3.org/2000/svg"><rect x="36" y="24" width="352" height="176" fill="#f7f3e9" stroke="#2d2a26" stroke-width="2.5"/><line x1="64" y1="176" x2="360" y2="176" stroke="#2d2a26" stroke-width="2.5"/><line x1="64" y1="176" x2="64" y2="48" stroke="#2d2a26" stroke-width="2.5"/><polyline points="64,160 170,132 280,108 360,78" fill="none" stroke="#5c80bc" stroke-width="3.5"/><circle cx="64" cy="160" r="5" fill="#5c80bc"/><circle cx="170" cy="132" r="5" fill="#5c80bc"/><circle cx="280" cy="108" r="5" fill="#5c80bc"/><circle cx="360" cy="78" r="5" fill="#5c80bc"/></svg>`
-      };
-    }
-  }
-
-  const firstTextIdx = nonVisual.findIndex(c => c?.type === 'text');
-  if (firstTextIdx >= 0) nonVisual.splice(firstTextIdx + 1, 0, graph);
-  else nonVisual.unshift(graph);
-  slide.components = nonVisual;
+  slide.components = comps.filter(c => c?.type !== 'svg' && c?.type !== 'image');
   return slide;
 }
 
