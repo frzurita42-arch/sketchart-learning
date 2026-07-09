@@ -369,8 +369,8 @@ function renderTimeTravelActivitySection() {
         </div>
         <label class="field"><span style="display:none">Custom headline</span>
           <input type="text" id="tt-headline" value="${esc(tt.headline || '')}" placeholder="e.g. City on Mars unveils first interplanetary water treaty" /></label>
-        <div class="settings-grid" style="margin-top:8px">
-          <div class="card" style="padding:12px">
+        <div class="card" style="padding:12px;margin-top:8px">
+          <div class="settings-compact">
             <label class="field"><span>Time period</span>
               <select id="tt-period">
                 <option value="past" ${tt.period === 'past' ? 'selected' : ''}>Past</option>
@@ -385,8 +385,6 @@ function renderTimeTravelActivitySection() {
                 <option value="standard" ${tt.complexity === 'standard' ? 'selected' : ''}>Standard</option>
                 <option value="scholarly" ${tt.complexity === 'scholarly' ? 'selected' : ''}>Scholarly</option>
               </select></label>
-          </div>
-          <div class="card" style="padding:12px">
             <label class="field"><span>Paragraph length</span>
               <select id="tt-paragraph-length">
                 <option value="brief" ${tt.paragraphLength === 'brief' ? 'selected' : ''}>Brief</option>
