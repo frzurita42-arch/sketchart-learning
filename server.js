@@ -1260,61 +1260,59 @@ function makeFallbackSlide({ topic, concept, level, settings = {}, slideNumber, 
     components.push({ type: 'text', content: paraPool[i % paraPool.length] });
   }
 
-  if (proofMode) {
-    components.push({
-      type: 'latex',
-      content: makeFallbackProofLatex({ topic, concept, slideNumber, branch }),
-      caption: `Proof step ${slideNumber}: ${title}`
-    });
-  }
-
-  if (isTimeTravel && !proofMode) {
-    if (slideNumber % 2 === 0) {
-      components.push({
-        type: 'table',
-        headers: ['Main idea', 'Different perspective'],
-        rows: [
-          ['Main pressure', 'How the same problem looks in a new era'],
-          ['Decision lens', 'What changes when the context shifts'],
-          ['Best metric', `What evidence still matters on slide ${slideNumber}`]
-        ],
-        caption: `Time-travel main idea vs perspective frame for slide ${slideNumber}`
-      });
-    } else {
-      components.push({
-        type: 'svg',
-        caption: `Feedback loop from policy to infrastructure outcomes (slide ${slideNumber})`,
-        svg: `<svg viewBox="0 0 420 220" xmlns="http://www.w3.org/2000/svg"><rect x="16" y="18" width="120" height="48" rx="10" fill="#f7f3e9" stroke="#2d2a26" stroke-width="2.5"/><text x="28" y="48" font-size="14" fill="#2d2a26">Policy choice</text><rect x="150" y="18" width="120" height="48" rx="10" fill="#f7f3e9" stroke="#2d2a26" stroke-width="2.5"/><text x="170" y="48" font-size="14" fill="#2d2a26">Resource flow</text><rect x="284" y="18" width="120" height="48" rx="10" fill="#f7f3e9" stroke="#2d2a26" stroke-width="2.5"/><text x="300" y="48" font-size="14" fill="#2d2a26">System impact</text><path d="M136 42 L150 42" stroke="#2d2a26" stroke-width="2.5"/><path d="M270 42 L284 42" stroke="#2d2a26" stroke-width="2.5"/><path d="M344 66 C344 120, 74 120, 74 66" fill="none" stroke="#5c80bc" stroke-width="2.5"/><polygon points="69,70 74,58 79,70" fill="#5c80bc"/><rect x="92" y="132" width="238" height="62" rx="10" fill="#fffbe8" stroke="#2d2a26" stroke-width="2.5"/><text x="108" y="158" font-size="14" fill="#2d2a26">Review metric: reliability, fairness, sustainability</text><text x="108" y="178" font-size="14" fill="#2d2a26">Then adjust the next policy cycle</text></svg>`
-      });
-    }
-  }
-
-  // Show the richer component toolbox in the offline fallback too, chosen by subject.
+  // Rotate through the WHOLE toolbox across slides so a presentation shows latex,
+  // charts, tables, SVG diagrams and sticky notes — not one type repeated. Choice is
+  // keyed to the subject and honors the support-material ratio (imageDensity).
+  const density = settings.imageDensity || 'balanced';
   const fbText = `${topic} ${concept}`.toLowerCase();
-  const fbStem = /math|physics|algorithm|statistic|data|calculus|algebra|probability|economics|finance|geometry|engineering/.test(fbText);
-  const fbHumanities = /history|war|empire|revolution|ancient|civiliz|politic|philosoph|literature|art|culture|geograph|biolog|biograph/.test(fbText);
-  if (!proofMode && settings.imageDensity !== 'text-only') {
-    if (fbStem && slideNumber % 2 === 0) {
-      components.push({
-        type: 'chart',
-        chartType: 'bar',
-        title: `${title}: illustrative comparison`,
-        series: [
-          { label: 'Case A', value: 40 + (slideNumber * 7) % 45 },
-          { label: 'Case B', value: 30 + (slideNumber * 13) % 55 },
-          { label: 'Case C', value: 25 + (slideNumber * 5) % 60 }
-        ],
-        caption: 'Illustrative values while AI providers are unavailable.'
-      });
-    } else {
-      components.push({
-        type: 'stickynote',
-        color: fbHumanities ? 'green' : 'blue',
-        title: fbHumanities ? 'Remember' : 'Key idea',
-        note: fbHumanities
-          ? `A vivid detail helps ${concept} stick — tie the date, name, or place to a story you can retell.`
-          : `Restate ${concept} in one sentence before moving on; if you can predict an outcome with it, it has sunk in.`
-      });
+  const fbStem = /math|physics|algorithm|statistic|data|calculus|algebra|probability|economics|finance|geometry|engineering|trig|matrix|vector|derivative|integral/.test(fbText);
+  const fbHumanities = /history|war|empire|revolution|ancient|civiliz|politic|philosoph|literature|art|culture|geograph|biolog|biograph|language|law|religion/.test(fbText);
+  const shortConcept = String(concept || topic || 'the idea').trim().slice(0, 22);
+  const escSvg = s => String(s || '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+
+  const buildSupport = (kind) => {
+    if (kind === 'latex') {
+      return { type: 'latex', content: makeFallbackProofLatex({ topic, concept, slideNumber, branch }), caption: `Key relation for ${title}` };
+    }
+    if (kind === 'chart') {
+      const t = slideNumber % 3;
+      if (t === 1) return { type: 'chart', chartType: 'line', title: `${shortConcept}: trend`, xLabel: 'Step', yLabel: 'Effect', points: [{ x: 1, y: 18 }, { x: 2, y: 33 }, { x: 3, y: 52 }, { x: 4, y: 69 }, { x: 5, y: 84 }], caption: 'Illustrative trend (offline demo values).' };
+      if (t === 2) return { type: 'chart', chartType: 'pie', title: `${shortConcept}: breakdown`, series: [{ label: 'Part A', value: 45 }, { label: 'Part B', value: 30 }, { label: 'Part C', value: 25 }], caption: 'Illustrative split (offline demo values).' };
+      return { type: 'chart', chartType: 'bar', title: `${shortConcept}: comparison`, series: [{ label: 'Case A', value: 40 + (slideNumber * 7) % 45 }, { label: 'Case B', value: 30 + (slideNumber * 13) % 50 }, { label: 'Case C', value: 25 + (slideNumber * 5) % 55 }], caption: 'Illustrative values (offline demo).' };
+    }
+    if (kind === 'table') {
+      return { type: 'table', headers: ['Main idea', 'Different perspective'], rows: [[`Core claim about ${shortConcept}`, 'A useful alternate angle or correction'], ['What it predicts', 'What would count as evidence against it'], ['Where it applies', 'Where it tends to break down']], caption: `Compare-and-contrast for ${shortConcept}` };
+    }
+    if (kind === 'svg') {
+      return { type: 'svg', caption: `How ${shortConcept} links cause to effect (slide ${slideNumber})`, svg: `<svg viewBox="0 0 440 170" xmlns="http://www.w3.org/2000/svg"><rect x="12" y="60" width="120" height="54" rx="10" fill="#f7f3e9" stroke="#2d2a26" stroke-width="2.5"/><text x="24" y="92" font-size="14" fill="#2d2a26">Cause</text><rect x="160" y="60" width="120" height="54" rx="10" fill="#eaf1fb" stroke="#2d2a26" stroke-width="2.5"/><text x="172" y="92" font-size="13" fill="#2d2a26">${escSvg(shortConcept.slice(0, 14))}</text><rect x="308" y="60" width="120" height="54" rx="10" fill="#eef7ee" stroke="#2d2a26" stroke-width="2.5"/><text x="320" y="92" font-size="14" fill="#2d2a26">Effect</text><line x1="132" y1="87" x2="152" y2="87" stroke="#2d2a26" stroke-width="2.5"/><polygon points="152,82 162,87 152,92" fill="#2d2a26"/><line x1="280" y1="87" x2="300" y2="87" stroke="#2d2a26" stroke-width="2.5"/><polygon points="300,82 310,87 300,92" fill="#2d2a26"/></svg>` };
+    }
+    // sticky
+    return {
+      type: 'stickynote',
+      color: fbHumanities ? 'green' : (slideNumber % 2 ? 'blue' : 'orange'),
+      title: fbHumanities ? 'Remember' : 'Key idea',
+      note: fbHumanities
+        ? `A vivid detail helps ${shortConcept} stick — tie a date, name, or place to a story you can retell.`
+        : `Restate ${shortConcept} in one sentence before moving on; if you can predict an outcome with it, it has sunk in.`
+    };
+  };
+
+  if (density !== 'text-only') {
+    const cycle = proofMode
+      ? ['latex', 'chart', 'latex', 'table', 'latex', 'sticky']
+      : fbHumanities
+        ? ['sticky', 'table', 'svg', 'sticky', 'table', 'svg']
+        : fbStem
+          ? ['chart', 'latex', 'table', 'svg', 'sticky', 'chart']
+          : ['chart', 'table', 'sticky', 'svg', 'chart', 'table'];
+    const idx = (Math.max(1, slideNumber) - 1) % cycle.length;
+    const want = density === 'mostly-visual' ? 2 : (density === 'balanced' && slideNumber % 2 === 0 ? 2 : 1);
+    const seen = new Set();
+    for (let k = 0; k < want; k++) {
+      const kind = cycle[(idx + k) % cycle.length];
+      if (seen.has(kind)) continue;
+      seen.add(kind);
+      components.push(buildSupport(kind));
     }
   }
 
@@ -2814,6 +2812,7 @@ Rules:
 - If the concept is mathematical or another topic where symbols clarify the reasoning, prefer a displayed LaTeX derivation even if the example is not explicitly a formal proof.
 - Across slides, vary representation naturally: include some text-only consolidation slides when a repeated formula would add little, and use formula slides only when symbols clarify a new step.
 - Never repeat the exact same displayed LaTeX block on consecutive slides; continue by adding or refining a different step.
+- REPRESENTATION VARIETY (important): do NOT make the presentation LaTeX-only. LaTeX is for symbolic reasoning, but across the slides you must also use OTHER component types where they explain better — a chart for quantities/trends/relationships, a table for structured comparisons, an svg diagram for structure/flow, and a sticky note for a highlight or common mistake. Aim for at least one non-LaTeX support component every couple of slides; a slide whose idea is best shown as a graph or diagram should use that, not a formula. Note: LaTeX here renders with KaTeX (math only) — it CANNOT draw TikZ/PGFPlots graphics, so use the "chart" or "svg" component for any plot or diagram.
 - IMAGE POLICY (adaptive): ${visualPlan.promptRule}
 - If including an image component, use a precise educational prompt that names the concept and the exact element to visualize. Avoid decorative prompts.
 - Any formula/proof/code explanation should be as substantial as the selected paragraph length setting; avoid tiny token examples for long-form settings.
