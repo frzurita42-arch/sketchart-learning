@@ -18,8 +18,8 @@ const PORT = process.env.PORT || 3000;
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 const DEEPSEEK_URL = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions';
 const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
-const DATA_DIR = path.join(__dirname, 'data');
-const GEN_DIR = path.join(DATA_DIR, 'generated');
+let DATA_DIR = path.join(__dirname, 'data');
+let GEN_DIR = path.join(DATA_DIR, 'generated');
 const SUGGESTED_STORE_FILE = 'suggested_topics.json';
 const HOME_TOPICS_STORE_FILE = 'home_topics.json';
 
@@ -81,6 +81,27 @@ function hasConfiguredKey(value) {
   const v = String(value || '').trim();
   if (!v) return false;
   return !/(your[-_ ]?key|sk-your-key-here|replace-me|placeholder)/i.test(v);
+}
+
+let canPersistFiles = true;
+
+function ensureDataDirs() {
+  const candidates = [
+    path.join(__dirname, 'data'),
+    path.join('/tmp', 'sketchlearn-data')
+  ];
+  for (const dir of candidates) {
+    try {
+      const gen = path.join(dir, 'generated');
+      fs.mkdirSync(gen, { recursive: true });
+      DATA_DIR = dir;
+      GEN_DIR = gen;
+      return;
+    } catch {
+      // try the next candidate
+    }
+  }
+  canPersistFiles = false;
 }
 
 const dbEnabled = hasConfiguredKey(DATABASE_URL);
@@ -152,7 +173,7 @@ async function initDatabase() {
   `);
 }
 
-fs.mkdirSync(GEN_DIR, { recursive: true });
+ensureDataDirs();
 
 function parseModelJson(raw) {
   const text = String(raw || '').trim();
@@ -207,10 +228,12 @@ function parseModelJson(raw) {
 
 // ---------- JSON file storage ----------
 function readJSON(file, fallback) {
+  if (!canPersistFiles) return fallback;
   try { return JSON.parse(fs.readFileSync(path.join(DATA_DIR, file), 'utf8')); }
   catch { return fallback; }
 }
 function writeJSON(file, data) {
+  if (!canPersistFiles) return;
   fs.writeFileSync(path.join(DATA_DIR, file), JSON.stringify(data, null, 2));
 }
 
