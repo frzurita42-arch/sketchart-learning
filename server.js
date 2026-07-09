@@ -2118,7 +2118,7 @@ app.post('/api/ai/slide', auth, async (req, res) => {
     : (allowModelSvg
       ? 'a LaTeX formula, a code snippet, a compact table, or a labelled svg diagram'
       : 'a LaTeX formula, a code snippet, or a compact table');
-  const isTimeTravelActivity = /time\s*travel|\bfuture\b|\bpast\b|\bpresent\b|headline|news/i.test(`${topic} ${concept} ${settings.customInstructions || ''}`);
+  const isTimeTravelActivity = settings.activityType === 'time-travel' || /time\s*travel|\bfuture\b|\bpast\b|\bpresent\b|headline|news/i.test(`${topic} ${concept} ${settings.customInstructions || ''}`);
   const canGenerateImage = true;
   const stemFocus = /math|physics|program|algorithm|computer|data|statistics|calculus|algebra|geometry|numerical|machine learning|ai|engineering|cryptography|proof|equation|formula|theorem|derivative|integral|linear algebra|probability/i
     .test(`${topic} ${concept}`);

@@ -498,6 +498,7 @@ function bindSuggestedTopicHandlers() {
     state.suggestedSettings = {
       totalSlides,
       tone: 'Storytelling',
+      activityType: 'time-travel',
       complexity,
       paragraphLength,
       paragraphCount,
@@ -1047,6 +1048,7 @@ function viewSettings() {
     state.settings = {
       totalSlides,
       tone,
+      activityType: state.suggestedSettings?.activityType || '',
       complexity: document.getElementById('set-complexity').value,
       paragraphLength: document.getElementById('set-paragraph').value,
       paragraphCount: parseInt(document.getElementById('set-paragraph-count').value, 10) || 3,
@@ -1182,7 +1184,7 @@ function buildTimeTravelImageDataUrl(slide, game) {
 
 function enforceTimeTravelImageClient(slide, game) {
   const context = `${game?.topic || ''} ${game?.concept || ''} ${game?.settings?.customInstructions || ''} ${slide?.title || ''} ${slide?.summary || ''}`;
-  const isTimeTravel = /time\s*travel|\bfuture\b|\bpast\b|\bpresent\b|headline|news/i.test(context);
+  const isTimeTravel = game?.settings?.activityType === 'time-travel' || /time\s*travel|\bfuture\b|\bpast\b|\bpresent\b|headline|news/i.test(context);
   if (!isTimeTravel) return slide;
   if (game?.settings?.imageDensity === 'text-only') return slide;
   if (!game._seenTimeTravelImageSigs) game._seenTimeTravelImageSigs = new Set();
