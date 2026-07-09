@@ -1107,8 +1107,91 @@ function shuffleInPlace(arr) {
   return arr;
 }
 
+function inferEraHint(text) {
+  const t = String(text || '').toLowerCase();
+  if (/future|futur|2050|2060|2070|2080|2090|2100|tomorrow|next decade|next century/.test(t)) return 'future';
+  if (/past|ancient|medieval|renaissance|victorian|historical|century ago|1800|1900|retro|old city/.test(t)) return 'past';
+  return 'present';
+}
+
+function escXmlText(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function buildTimeTravelImageDataUrl(slide, game) {
+  const context = [
+    game?.topic,
+    game?.concept,
+    game?.settings?.customInstructions,
+    slide?.title,
+    slide?.summary,
+    slide?.quiz?.question
+  ].filter(Boolean).join(' ');
+  const era = inferEraHint(context);
+  const palette = era === 'future'
+    ? { bg: '#e8f3ff', accent: '#5c80bc', ink: '#17324d' }
+    : era === 'past'
+      ? { bg: '#f7efe1', accent: '#a36a2c', ink: '#3b2611' }
+      : { bg: '#edf6ef', accent: '#3f8a58', ink: '#173223' };
+  const title = escXmlText(String(slide?.title || game?.concept || 'Time Travel concept').slice(0, 74));
+  const promptLine = escXmlText(String(slide?.quiz?.question || '').slice(0, 120));
+  const eraLabel = era.toUpperCase();
+  const nanoLabel = 'NANO BANANA STYLE';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="${title}">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="${palette.bg}"/>
+      <stop offset="100%" stop-color="#ffffff"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#g)"/>
+  <rect x="56" y="56" width="912" height="912" rx="28" fill="none" stroke="${palette.accent}" stroke-width="10"/>
+  <text x="84" y="118" font-family="Georgia, serif" font-size="38" fill="${palette.ink}">${nanoLabel}</text>
+  <text x="84" y="168" font-family="Georgia, serif" font-size="36" fill="${palette.ink}">${eraLabel} SCENE</text>
+  <text x="84" y="226" font-family="Georgia, serif" font-size="32" fill="${palette.ink}">${title}</text>
+  <text x="84" y="278" font-family="Arial, sans-serif" font-size="24" fill="${palette.ink}">${promptLine}</text>
+  <g stroke="${palette.ink}" stroke-width="8" fill="none" opacity="0.9">
+    <path d="M110 760 C 250 640, 380 650, 520 760"/>
+    <path d="M500 760 C 640 620, 760 640, 900 760"/>
+    <rect x="180" y="520" width="170" height="210" rx="8" fill="${palette.accent}" opacity="0.2"/>
+    <rect x="390" y="450" width="220" height="280" rx="8" fill="${palette.accent}" opacity="0.16"/>
+    <rect x="660" y="500" width="170" height="230" rx="8" fill="${palette.accent}" opacity="0.2"/>
+  </g>
+</svg>`;
+  return { era, url: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}` };
+}
+
+function enforceTimeTravelImageClient(slide, game) {
+  const context = `${game?.topic || ''} ${game?.concept || ''} ${game?.settings?.customInstructions || ''} ${slide?.title || ''} ${slide?.summary || ''}`;
+  const isTimeTravel = /time\s*travel|\bfuture\b|\bpast\b|\bpresent\b|headline|news/i.test(context);
+  if (!isTimeTravel) return slide;
+  if (game?.settings?.imageDensity === 'text-only') return slide;
+
+  const visualTypes = new Set(['table', 'svg', 'image', 'latex', 'code']);
+  const nonVisual = (Array.isArray(slide?.components) ? slide.components : []).filter(c => !visualTypes.has(c?.type));
+  const built = buildTimeTravelImageDataUrl(slide, game);
+  const imageComp = {
+    type: 'image',
+    url: built.url,
+    frame: (game?.slideNumber || 1) % 2 === 0 ? 'polaroid' : 'paper',
+    caption: `${String(built.era || 'present').toUpperCase()} scene: ${String(slide?.title || game?.concept || 'Time Travel concept').trim()}`
+  };
+
+  const firstTextIdx = nonVisual.findIndex(c => c?.type === 'text');
+  if (firstTextIdx >= 0) nonVisual.splice(firstTextIdx + 1, 0, imageComp);
+  else nonVisual.unshift(imageComp);
+  slide.components = nonVisual;
+  return slide;
+}
+
 function showSlide(slide) {
   const g = state.game;
+  slide = enforceTimeTravelImageClient(slide, g);
   // shuffle option order so the correct answer isn't always in the same slot;
   // done once here, before both rendering and prefetch, so indices stay aligned
   if (slide.quiz && Array.isArray(slide.quiz.options)) shuffleInPlace(slide.quiz.options);
