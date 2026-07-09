@@ -125,7 +125,7 @@ function viewHome() {
   $app.innerHTML = `
     <h1 class="view-title">What do you want to <span class="scribble-underline">learn</span> today?</h1>
     <p class="view-sub">Pick a subject, or write your own.</p>
-    <div class="slide-actions" style="justify-content:center;margin:-10px 0 10px">
+    <div class="slide-actions" style="justify-content:center;margin:10px 0 10px;border-top:3px dashed var(--ink);padding-top:14px">
       <button class="btn small" id="refresh-home-feed">↻ Refresh feed</button>
     </div>
     ${renderHomeFeed()}`;
@@ -168,7 +168,7 @@ function viewHomeWithCurrentTopics() {
   $app.innerHTML = `
     <h1 class="view-title">What do you want to <span class="scribble-underline">learn</span> today?</h1>
     <p class="view-sub">Pick a subject, or write your own.</p>
-    <div class="slide-actions" style="justify-content:center;margin:-10px 0 10px">
+    <div class="slide-actions" style="justify-content:center;margin:10px 0 10px;border-top:3px dashed var(--ink);padding-top:14px">
       <button class="btn small" id="refresh-home-feed">↻ Refresh feed</button>
     </div>
     ${renderHomeFeed()}`;
