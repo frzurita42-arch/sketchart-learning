@@ -1447,8 +1447,10 @@ function buildTimeTravelImagePrompt(slide, context = {}) {
   return [
     'NANO BANANA style educational illustration for a Time Travel learning slide.',
     `Topic: ${context.topic || ''}. Concept: ${context.concept || ''}.`,
+    `This is slide ${context.slideNumber || 1} of ${context.totalSlides || '?'}.`,
     `Slide focus: ${narrative.slice(0, 700)}`,
     eraDirection,
+    'Make this scene composition clearly different from earlier slides in the same activity.',
     'The scene must directly visualize the concept in this story and support answering the slide quiz.',
     'No anachronisms: all visual details must match the selected time period accurately.',
     'Cinematic but classroom-safe, clear composition, high detail, no text overlays, no logos.'
@@ -1539,6 +1541,15 @@ function fallbackImageDataUrl(prompt = '', caption = '') {
   const a = escXml(String(caption || 'Time Travel scene').slice(0, 72));
   const b = escXml(String(prompt).replace(/\s+/g, ' ').trim().slice(0, 96));
   const c = escXml(String(prompt).replace(/\s+/g, ' ').trim().slice(96, 190));
+  let hash = 0;
+  const seedSource = `${prompt}|${caption}`;
+  for (let i = 0; i < seedSource.length; i++) hash = ((hash << 5) - hash + seedSource.charCodeAt(i)) | 0;
+  hash = Math.abs(hash);
+  const h1 = 130 + (hash % 180);
+  const h2 = 160 + ((hash >> 3) % 220);
+  const h3 = 140 + ((hash >> 5) % 200);
+  const c1 = 700 - ((hash >> 2) % 100);
+  const c2 = 690 - ((hash >> 4) % 100);
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="${a}">
   <defs>
@@ -1549,16 +1560,16 @@ function fallbackImageDataUrl(prompt = '', caption = '') {
   </defs>
   <rect width="1024" height="1024" fill="url(#g)"/>
   <rect x="56" y="56" width="912" height="912" rx="28" fill="none" stroke="${palette.accent}" stroke-width="10"/>
-  <text x="84" y="130" font-family="Georgia, serif" font-size="42" fill="${palette.ink}">${eraLabel} SCENE</text>
+  <text x="84" y="130" font-family="Georgia, serif" font-size="42" fill="${palette.ink}">NANO BANANA ${eraLabel} SCENE</text>
   <text x="84" y="196" font-family="Georgia, serif" font-size="34" fill="${palette.ink}">${a}</text>
   <text x="84" y="252" font-family="Arial, sans-serif" font-size="24" fill="${palette.ink}">${b}</text>
   <text x="84" y="290" font-family="Arial, sans-serif" font-size="24" fill="${palette.ink}">${c}</text>
   <g stroke="${palette.ink}" stroke-width="8" fill="none" opacity="0.9">
-    <path d="M110 760 C 250 640, 380 650, 520 760"/>
-    <path d="M500 760 C 640 620, 760 640, 900 760"/>
-    <rect x="180" y="520" width="170" height="210" rx="8" fill="${palette.accent}" opacity="0.2"/>
-    <rect x="390" y="450" width="220" height="280" rx="8" fill="${palette.accent}" opacity="0.16"/>
-    <rect x="660" y="500" width="170" height="230" rx="8" fill="${palette.accent}" opacity="0.2"/>
+    <path d="M110 ${c1} C 250 ${c1 - 120}, 380 ${c1 - 110}, 520 ${c1}"/>
+    <path d="M500 ${c2} C 640 ${c2 - 120}, 760 ${c2 - 110}, 900 ${c2}"/>
+    <rect x="180" y="${860 - h1}" width="170" height="${h1}" rx="8" fill="${palette.accent}" opacity="0.2"/>
+    <rect x="390" y="${860 - h2}" width="220" height="${h2}" rx="8" fill="${palette.accent}" opacity="0.16"/>
+    <rect x="660" y="${860 - h3}" width="170" height="${h3}" rx="8" fill="${palette.accent}" opacity="0.2"/>
   </g>
 </svg>`;
 

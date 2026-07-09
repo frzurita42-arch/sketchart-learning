@@ -1123,6 +1123,13 @@ function escXmlText(s) {
     .replace(/'/g, '&apos;');
 }
 
+function hashText(s) {
+  let h = 0;
+  const t = String(s || '');
+  for (let i = 0; i < t.length; i++) h = ((h << 5) - h + t.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
 function buildTimeTravelImageDataUrl(slide, game) {
   const context = [
     game?.topic,
@@ -1140,6 +1147,13 @@ function buildTimeTravelImageDataUrl(slide, game) {
       : { bg: '#edf6ef', accent: '#3f8a58', ink: '#173223' };
   const title = escXmlText(String(slide?.title || game?.concept || 'Time Travel concept').slice(0, 74));
   const promptLine = escXmlText(String(slide?.quiz?.question || '').slice(0, 120));
+  const slideNo = Number(game?.slideNumber || 1);
+  const seed = hashText(`${context}|${slideNo}`);
+  const h1 = 130 + (seed % 180);
+  const h2 = 160 + ((seed >> 3) % 220);
+  const h3 = 140 + ((seed >> 5) % 200);
+  const c1 = 700 - ((seed >> 2) % 100);
+  const c2 = 690 - ((seed >> 4) % 100);
   const eraLabel = era.toUpperCase();
   const nanoLabel = 'NANO BANANA STYLE';
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="${title}">
@@ -1152,15 +1166,15 @@ function buildTimeTravelImageDataUrl(slide, game) {
   <rect width="1024" height="1024" fill="url(#g)"/>
   <rect x="56" y="56" width="912" height="912" rx="28" fill="none" stroke="${palette.accent}" stroke-width="10"/>
   <text x="84" y="118" font-family="Georgia, serif" font-size="38" fill="${palette.ink}">${nanoLabel}</text>
-  <text x="84" y="168" font-family="Georgia, serif" font-size="36" fill="${palette.ink}">${eraLabel} SCENE</text>
+  <text x="84" y="168" font-family="Georgia, serif" font-size="36" fill="${palette.ink}">${eraLabel} SCENE - SLIDE ${slideNo}</text>
   <text x="84" y="226" font-family="Georgia, serif" font-size="32" fill="${palette.ink}">${title}</text>
   <text x="84" y="278" font-family="Arial, sans-serif" font-size="24" fill="${palette.ink}">${promptLine}</text>
   <g stroke="${palette.ink}" stroke-width="8" fill="none" opacity="0.9">
-    <path d="M110 760 C 250 640, 380 650, 520 760"/>
-    <path d="M500 760 C 640 620, 760 640, 900 760"/>
-    <rect x="180" y="520" width="170" height="210" rx="8" fill="${palette.accent}" opacity="0.2"/>
-    <rect x="390" y="450" width="220" height="280" rx="8" fill="${palette.accent}" opacity="0.16"/>
-    <rect x="660" y="500" width="170" height="230" rx="8" fill="${palette.accent}" opacity="0.2"/>
+    <path d="M110 ${c1} C 250 ${c1 - 120}, 380 ${c1 - 110}, 520 ${c1}"/>
+    <path d="M500 ${c2} C 640 ${c2 - 120}, 760 ${c2 - 110}, 900 ${c2}"/>
+    <rect x="180" y="${860 - h1}" width="170" height="${h1}" rx="8" fill="${palette.accent}" opacity="0.2"/>
+    <rect x="390" y="${860 - h2}" width="220" height="${h2}" rx="8" fill="${palette.accent}" opacity="0.16"/>
+    <rect x="660" y="${860 - h3}" width="170" height="${h3}" rx="8" fill="${palette.accent}" opacity="0.2"/>
   </g>
 </svg>`;
   return { era, url: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}` };
@@ -1171,16 +1185,38 @@ function enforceTimeTravelImageClient(slide, game) {
   const isTimeTravel = /time\s*travel|\bfuture\b|\bpast\b|\bpresent\b|headline|news/i.test(context);
   if (!isTimeTravel) return slide;
   if (game?.settings?.imageDensity === 'text-only') return slide;
+  if (!game._seenTimeTravelImageSigs) game._seenTimeTravelImageSigs = new Set();
 
   const visualTypes = new Set(['table', 'svg', 'image', 'latex', 'code']);
-  const nonVisual = (Array.isArray(slide?.components) ? slide.components : []).filter(c => !visualTypes.has(c?.type));
+  const comps = Array.isArray(slide?.components) ? slide.components : [];
+  const existingImage = comps.find(c => c?.type === 'image' && c.url);
+  const existingSig = existingImage
+    ? `${String(existingImage.url || '').slice(0, 260)}|${String(existingImage.caption || '').trim()}`
+    : '';
+
+  if (existingSig && !game._seenTimeTravelImageSigs.has(existingSig)) {
+    game._seenTimeTravelImageSigs.add(existingSig);
+    const nonVisualOnly = comps.filter(c => !visualTypes.has(c?.type));
+    const firstTextIdx = nonVisualOnly.findIndex(c => c?.type === 'text');
+    const keptImage = {
+      ...existingImage,
+      caption: `${String(inferEraHint(context)).toUpperCase()} scene: Slide ${String(game?.slideNumber || 1)} - ${String(slide?.title || game?.concept || 'Time Travel concept').trim()}`
+    };
+    if (firstTextIdx >= 0) nonVisualOnly.splice(firstTextIdx + 1, 0, keptImage);
+    else nonVisualOnly.unshift(keptImage);
+    slide.components = nonVisualOnly;
+    return slide;
+  }
+
+  const nonVisual = comps.filter(c => !visualTypes.has(c?.type));
   const built = buildTimeTravelImageDataUrl(slide, game);
   const imageComp = {
     type: 'image',
     url: built.url,
     frame: (game?.slideNumber || 1) % 2 === 0 ? 'polaroid' : 'paper',
-    caption: `${String(built.era || 'present').toUpperCase()} scene: ${String(slide?.title || game?.concept || 'Time Travel concept').trim()}`
+    caption: `${String(built.era || 'present').toUpperCase()} scene: Slide ${String(game?.slideNumber || 1)} - ${String(slide?.title || game?.concept || 'Time Travel concept').trim()}`
   };
+  game._seenTimeTravelImageSigs.add(`${String(imageComp.url || '').slice(0, 260)}|${imageComp.caption}`);
 
   const firstTextIdx = nonVisual.findIndex(c => c?.type === 'text');
   if (firstTextIdx >= 0) nonVisual.splice(firstTextIdx + 1, 0, imageComp);
