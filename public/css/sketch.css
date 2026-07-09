@@ -136,6 +136,13 @@ label.field > span { display: block; margin-bottom: 4px; }
 .level-block { margin-bottom: 22px; }
 .level-block h3 { margin-bottom: 4px; }
 .level-block .level-desc { opacity: .75; margin-bottom: 10px; }
+.level-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
 .concept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .concept-card {
   text-align: left; cursor: pointer;

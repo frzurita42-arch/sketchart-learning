@@ -9,12 +9,32 @@ const TONES = ['Friendly lecture', 'Casual conversation', 'Hopeful & encouraging
 const state = {
   topic: null,
   path: null,
+  homeTopics: [],
   concept: null,
   level: null,
   settings: null,
   game: null,
   chat: [{ role: 'assistant', content: "Hi! I'm your SketchLearn coach. I can see your progress spreadsheet and help you pick what to study next, or explain how to use the site. What are you curious about?" }]
 };
+
+function shuffled(arr) {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function withTimeout(promise, ms, message) {
+  let timer = null;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message || 'Request timed out')), ms);
+    })
+  ]).finally(() => clearTimeout(timer));
+}
 
 /* ---------------- routing ---------------- */
 function nav(view) {
@@ -75,15 +95,83 @@ function viewLogin() {
 
 /* ---------------- home: pick a topic ---------------- */
 function viewHome() {
+  state.homeTopics = shuffled(PRESET_TOPICS);
   $app.innerHTML = `
     <h1 class="view-title">What do you want to <span class="scribble-underline">learn</span> today?</h1>
     <p class="view-sub">Pick a subject, or write your own.</p>
-    <div class="chip-row">${PRESET_TOPICS.map(t => `<button class="chip" data-topic="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+    <div class="slide-actions" style="justify-content:center;margin-bottom:10px">
+      <button class="btn small blue" id="refresh-home-topics">↻ Refresh 12 topic ideas</button>
+    </div>
+    <div class="chip-row">${state.homeTopics.map(t => `<button class="chip" data-topic="${esc(t)}">${esc(t)}</button>`).join('')}</div>
     <div class="card alt" style="max-width:560px;margin:26px auto 0">
       <label class="field"><span>…or a custom topic</span>
         <input type="text" id="custom-topic" placeholder="e.g. Renaissance art, Rust programming, beekeeping…" /></label>
       <button class="btn primary" id="custom-topic-btn">Draw my path →</button>
     </div>`;
+
+  document.getElementById('refresh-home-topics').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    const oldLabel = btn.textContent;
+    btn.textContent = 'Refreshing ideas…';
+    try {
+      const r = await withTimeout(API.post('/api/ai/topics', {
+        count: 12,
+        avoid: state.homeTopics
+      }), 25000, 'Topic refresh timed out. Please retry.');
+      if (!r || !Array.isArray(r.topics)) return;
+      const fromAI = r.topics.map(t => t.name).filter(Boolean);
+      if (fromAI.length) state.homeTopics = shuffled(fromAI).slice(0, 12);
+      viewHomeWithCurrentTopics();
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = oldLabel;
+      alert(`Could not refresh topics: ${err.message}`);
+    }
+  });
+
+  bindHomeTopicHandlers();
+}
+
+function viewHomeWithCurrentTopics() {
+  $app.innerHTML = `
+    <h1 class="view-title">What do you want to <span class="scribble-underline">learn</span> today?</h1>
+    <p class="view-sub">Pick a subject, or write your own.</p>
+    <div class="slide-actions" style="justify-content:center;margin-bottom:10px">
+      <button class="btn small blue" id="refresh-home-topics">↻ Refresh 12 topic ideas</button>
+    </div>
+    <div class="chip-row">${shuffled(state.homeTopics).map(t => `<button class="chip" data-topic="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+    <div class="card alt" style="max-width:560px;margin:26px auto 0">
+      <label class="field"><span>…or a custom topic</span>
+        <input type="text" id="custom-topic" placeholder="e.g. Renaissance art, Rust programming, beekeeping…" /></label>
+      <button class="btn primary" id="custom-topic-btn">Draw my path →</button>
+    </div>`;
+
+  document.getElementById('refresh-home-topics').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    const oldLabel = btn.textContent;
+    btn.textContent = 'Refreshing ideas…';
+    try {
+      const r = await withTimeout(API.post('/api/ai/topics', {
+        count: 12,
+        avoid: state.homeTopics
+      }), 25000, 'Topic refresh timed out. Please retry.');
+      if (!r || !Array.isArray(r.topics)) return;
+      const fromAI = r.topics.map(t => t.name).filter(Boolean);
+      if (fromAI.length) state.homeTopics = shuffled(fromAI).slice(0, 12);
+      viewHomeWithCurrentTopics();
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = oldLabel;
+      alert(`Could not refresh topics: ${err.message}`);
+    }
+  });
+
+  bindHomeTopicHandlers();
+}
+
+function bindHomeTopicHandlers() {
   $app.querySelectorAll('[data-topic]').forEach(b => b.addEventListener('click', () => loadPath(b.dataset.topic)));
   const custom = () => {
     const t = document.getElementById('custom-topic').value.trim();
@@ -101,11 +189,12 @@ async function loadPath(topic, guidance, levels, opts = {}) {
     : `Asking the AI to sketch a learning path for “${topic}”…`;
   $app.innerHTML = loadingHTML(msg);
   try {
-    state.path = await API.post('/api/ai/path', {
+    state.path = await withTimeout(API.post('/api/ai/path', {
       topic, guidance, levels,
       fromHistory: !!opts.fromHistory,
       freshSeed: opts.fresh ? Math.random().toString(36).slice(2, 8) : undefined
-    });
+    }), 30000, 'Path generation timed out. Please try again.');
+    if (!state.path) return;
     viewPath();
   } catch (e) {
     $app.innerHTML = `<div class="card"><p>😖 Could not draw the path: ${esc(e.message)}</p>
@@ -135,7 +224,10 @@ function viewPath() {
     </div>
     ${(p.levels || []).map(lv => `
       <div class="level-block">
-        <h3>${esc(lv.level)}</h3>
+        <div class="level-head">
+          <h3>${esc(lv.level)}</h3>
+          <button class="btn small" data-refresh-level="${esc(lv.level)}">↻ Refresh ${Math.max(1, (lv.concepts || []).length)} concepts</button>
+        </div>
         <p class="level-desc">${esc(lv.description || '')}</p>
         <div class="concept-grid">
           ${(lv.concepts || []).map(c => `
@@ -165,6 +257,38 @@ function viewPath() {
     const levels = [...document.querySelectorAll('#level-filter .chip.selected')].map(c => c.dataset.level);
     loadPath(state.topic, guidance, levels.length ? levels : undefined, { fromHistory: true, fresh: true });
   });
+  $app.querySelectorAll('[data-refresh-level]').forEach(btn => btn.addEventListener('click', async () => {
+    const level = btn.dataset.refreshLevel;
+    const lv = (state.path.levels || []).find(x => x.level === level);
+    if (!lv) return;
+    const count = Math.max(1, (lv.concepts || []).length || 5);
+    const guidance = document.getElementById('path-guidance').value.trim() || undefined;
+    const avoid = (lv.concepts || []).map(c => c.name).filter(Boolean);
+    btn.disabled = true;
+    const old = btn.textContent;
+    btn.textContent = 'Refreshing…';
+    try {
+      const refreshed = await withTimeout(API.post('/api/ai/path/level-refresh', {
+        topic: state.topic,
+        level,
+        count,
+        avoidConcepts: avoid,
+        guidance
+      }), 25000, `${level} refresh timed out. Please retry.`);
+      state.path.levels = (state.path.levels || []).map(x => x.level === level
+        ? {
+            ...x,
+            description: refreshed.description || x.description,
+            concepts: (refreshed.concepts || []).length ? refreshed.concepts : x.concepts
+          }
+        : x);
+      viewPath();
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = old;
+      alert(`Could not refresh ${level}: ${err.message}`);
+    }
+  }));
   $app.querySelectorAll('.concept-card').forEach(c => c.addEventListener('click', () => {
     state.concept = c.dataset.concept; state.level = c.dataset.level; viewSettings();
   }));

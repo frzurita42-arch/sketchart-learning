@@ -87,6 +87,12 @@ function writeJSON(file, data) {
   fs.writeFileSync(path.join(DATA_DIR, file), JSON.stringify(data, null, 2));
 }
 
+function recentUserGames(username, limit = 20) {
+  return readJSON('games.json', [])
+    .filter(g => g.username === username)
+    .slice(-limit);
+}
+
 // ---------- users ----------
 function hashPassword(password, salt) {
   return crypto.scryptSync(String(password), salt, 64).toString('hex');
@@ -581,6 +587,90 @@ Include ONLY these levels, in this order: ${wanted.join(', ')}. Give 4-6 concret
   }
 });
 
+// ---------- AI: topic suggestions for the home chips ----------
+app.post('/api/ai/topics', auth, async (req, res) => {
+  const { count = 12, avoid = [] } = req.body || {};
+  const wanted = Math.min(20, Math.max(6, parseInt(count, 10) || 12));
+  const games = recentUserGames(req.user.username, 25);
+  const learned = [...new Set(games.map(g => `${g.topic} / ${g.concept}`).filter(Boolean))].slice(-18);
+  const avoidList = Array.isArray(avoid) ? avoid.map(String).filter(Boolean).slice(0, 30) : [];
+
+  try {
+    const result = await generateStructured([
+      {
+        role: 'system',
+        content: `Return JSON only:
+{"topics":[{"name":string,"why":string}]}
+Rules:
+- Exactly ${wanted} topics.
+- Mix: about half deepen what this learner already studies; about half tie to current global issues/trends across fields.
+- Topic names: short, concrete (2-5 words), classroom-safe.
+- No duplicates.`
+      },
+      {
+        role: 'user',
+        content: `Learner recent studies:\n${learned.join('\n') || 'none yet'}\n\nAvoid these topic names:\n${avoidList.join('\n') || 'none'}`
+      }
+    ], { temperature: 0.7, maxTokens: 1800 });
+
+    const topics = (result.topics || [])
+      .map(t => ({
+        name: String(t.name || '').trim(),
+        why: String(t.why || '').trim()
+      }))
+      .filter(t => t.name)
+      .filter((t, i, arr) => arr.findIndex(x => x.name.toLowerCase() === t.name.toLowerCase()) === i)
+      .slice(0, wanted);
+
+    res.json({ topics });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+// ---------- AI: refresh concepts for one level only ----------
+app.post('/api/ai/path/level-refresh', auth, async (req, res) => {
+  const { topic, level, count = 5, avoidConcepts = [], guidance } = req.body || {};
+  if (!topic || !level) return res.status(400).json({ error: 'Topic and level are required' });
+  const wanted = Math.min(8, Math.max(3, parseInt(count, 10) || 5));
+  const games = recentUserGames(req.user.username, 20);
+  const recent = games.map(g => `- ${g.topic} / ${g.concept} (${g.level}): ${g.correct}/${g.total}`).join('\n');
+  const avoid = (Array.isArray(avoidConcepts) ? avoidConcepts : []).map(String).filter(Boolean).slice(0, 40);
+
+  try {
+    const result = await generateStructured([
+      {
+        role: 'system',
+        content: `You are a curriculum designer. Return JSON only:
+{"level":string,"description":string,"concepts":[{"name":string,"blurb":string}]}
+Rules:
+- level must be exactly "${level}".
+- exactly ${wanted} concepts.
+- Keep concepts strictly at ${level} difficulty.
+- concepts must be different from the avoid list.
+- blurb max 15 words each.`
+      },
+      {
+        role: 'user',
+        content: `Topic: ${topic}\n${guidance ? `Guidance: ${guidance}\n` : ''}Avoid concepts:\n${avoid.join('\n') || 'none'}\n\nRecent learner history:\n${recent || 'none yet'}\n\nBalance: reinforce this learner's weak spots while still surfacing globally relevant, timely angles.`
+      }
+    ], { temperature: 0.8, maxTokens: 2200 });
+
+    const out = {
+      level,
+      description: String(result.description || '').trim(),
+      concepts: (result.concepts || [])
+        .map(c => ({ name: String(c.name || '').trim(), blurb: String(c.blurb || '').trim() }))
+        .filter(c => c.name)
+        .filter((c, i, arr) => arr.findIndex(x => x.name.toLowerCase() === c.name.toLowerCase()) === i)
+        .slice(0, wanted)
+    };
+    res.json(out);
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
 // ---------- AI: one slide (also used to prefetch each answer branch) ----------
 app.post('/api/ai/slide', auth, async (req, res) => {
   const { gameId, topic, concept, level, settings = {}, slideNumber, totalSlides, history = [], branch } = req.body || {};
@@ -629,7 +719,6 @@ Rules:
 - Make the quiz genuinely CHALLENGING, not obvious: every option must be on-topic and plausible to someone who only half-understood the slide. Never make the correct answer the conspicuously longest or most detailed, and never make wrong options absurd or off-topic. Each wrong option is a common, tempting mistake that reveals a DIFFERENT misconception. A careless reader should be able to fall for a distractor; only careful reasoning from the slide's paragraphs should yield the right answer.
 - LENGTH: the slide MUST contain exactly ${paraCount} distinct paragraph(s) of prose (as separate "text" components), each about ${paragraphWords} words. Do not collapse them, and do not pad — each paragraph carries new substance. ${densityRule}
 - COHESION: the paragraphs must build on one another in order — introduce the idea, develop it, then apply or consolidate it — never restating the same point. The slide must also connect to the previous slides (briefly recall or build on them) and set up what comes next, so the whole presentation reads as one continuous, complementary lesson rather than isolated cards.
-- VISUALS: pick the visual that BEST fits this slide and make it ACCURATELY represent what the paragraphs say — never a generic or decorative figure (no meaningless Venn diagrams, plain squares, or random shapes). Choose from ${visualMenu}: use a LaTeX formula when the idea is mathematical, a code snippet (with the correct language) when it is about programming/algorithms/data, ${imageEnabled ? 'a generated image when a rich pictorial or real-world depiction helps understanding, ' : ''}and a labelled svg diagram when the idea is a structure, process, or relationship. Vary the visual type across consecutive slides, and you may combine two (e.g. a formula AND a diagram). Prefer inline $...$ math inside paragraphs wherever a symbol or equation is mentioned.
  - VISUALS: pick the visual that BEST fits this slide and make it ACCURATELY represent what the paragraphs say — never a generic or decorative figure (no meaningless Venn diagrams, plain squares, or random shapes). Choose from ${visualMenu}: use a LaTeX formula when the idea is mathematical, a code snippet (with the correct language) when it is about programming/algorithms/data, ${imageEnabled ? 'and a generated image when a rich pictorial or real-world depiction helps understanding. ' : ''}${allowModelSvg ? 'and a labelled svg diagram when the idea is a structure, process, or relationship. ' : ''}Vary the visual type across consecutive slides, and you may combine two (e.g. a formula AND an image). Prefer inline $...$ math inside paragraphs wherever a symbol or equation is mentioned.
 - Tone/sentiment of all writing: ${settings.tone || 'friendly lecture'}. Complexity of language: ${settings.complexity || 'standard'}. Audience level: ${level}.
 ${settings.language ? `- Write ALL text (including quiz and explanations) in ${settings.language}.\n` : ''}${settings.audience ? `- The reader is: ${settings.audience}. Pitch every explanation to them.\n` : ''}${settings.customInstructions ? `- Extra author instructions from the learner (follow them where they don't conflict with the schema): ${settings.customInstructions}\n` : ''}
