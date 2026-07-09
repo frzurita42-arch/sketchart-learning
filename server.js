@@ -1289,6 +1289,35 @@ function makeFallbackSlide({ topic, concept, level, settings = {}, slideNumber, 
     }
   }
 
+  // Show the richer component toolbox in the offline fallback too, chosen by subject.
+  const fbText = `${topic} ${concept}`.toLowerCase();
+  const fbStem = /math|physics|algorithm|statistic|data|calculus|algebra|probability|economics|finance|geometry|engineering/.test(fbText);
+  const fbHumanities = /history|war|empire|revolution|ancient|civiliz|politic|philosoph|literature|art|culture|geograph|biolog|biograph/.test(fbText);
+  if (!proofMode && settings.imageDensity !== 'text-only') {
+    if (fbStem && slideNumber % 2 === 0) {
+      components.push({
+        type: 'chart',
+        chartType: 'bar',
+        title: `${title}: illustrative comparison`,
+        series: [
+          { label: 'Case A', value: 40 + (slideNumber * 7) % 45 },
+          { label: 'Case B', value: 30 + (slideNumber * 13) % 55 },
+          { label: 'Case C', value: 25 + (slideNumber * 5) % 60 }
+        ],
+        caption: 'Illustrative values while AI providers are unavailable.'
+      });
+    } else {
+      components.push({
+        type: 'stickynote',
+        color: fbHumanities ? 'green' : 'blue',
+        title: fbHumanities ? 'Remember' : 'Key idea',
+        note: fbHumanities
+          ? `A vivid detail helps ${concept} stick — tie the date, name, or place to a story you can retell.`
+          : `Restate ${concept} in one sentence before moving on; if you can predict an outcome with it, it has sunk in.`
+      });
+    }
+  }
+
   return {
     title,
     summary: `Fallback slide ${slideNumber}/${totalSlides} reinforcing ${concept} at ${level} level while AI providers are unavailable.`,
@@ -1404,6 +1433,25 @@ function sanitizeComponents(components) {
       c.rows = rows;
       c.caption = String(c.caption || '').trim();
     }
+    if (c && c.type === 'stickynote') {
+      c.color = ['yellow', 'pink', 'blue', 'green', 'orange'].includes(String(c.color || '').toLowerCase()) ? String(c.color).toLowerCase() : 'yellow';
+      c.title = String(c.title || c.label || '').trim().slice(0, 60);
+      c.note = String(c.note || c.content || '').trim().slice(0, 400);
+    }
+    if (c && c.type === 'chart') {
+      c.chartType = ['bar', 'pie', 'donut', 'line', 'area', 'scatter', 'bubble'].includes(String(c.chartType || '').toLowerCase()) ? String(c.chartType).toLowerCase() : 'bar';
+      c.title = String(c.title || '').trim().slice(0, 80);
+      c.caption = String(c.caption || '').trim().slice(0, 160);
+      c.xLabel = String(c.xLabel || '').trim().slice(0, 40);
+      c.yLabel = String(c.yLabel || '').trim().slice(0, 40);
+      c.series = Array.isArray(c.series)
+        ? c.series.map(s => ({ label: String(s?.label || '').trim().slice(0, 24), value: Number(s?.value) })).filter(s => Number.isFinite(s.value)).slice(0, 8)
+        : [];
+      c.points = Array.isArray(c.points)
+        ? c.points.map(p => ({ x: Number(p?.x), y: Number(p?.y), r: Number(p?.r), label: String(p?.label || '').trim().slice(0, 24) }))
+            .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y)).slice(0, 60)
+        : [];
+    }
     return c;
   }).filter(c => {
     if (!c || !c.type) return false;
@@ -1412,6 +1460,11 @@ function sanitizeComponents(components) {
     if (c.type === 'latex') return !!c.content;
     if (c.type === 'image') return !!(c.url || c.prompt);
     if (c.type === 'table') return Array.isArray(c.headers) && c.headers.length > 0 && Array.isArray(c.rows) && c.rows.length > 0;
+    if (c.type === 'stickynote') return !!c.note;
+    if (c.type === 'chart') {
+      const xy = ['line', 'area', 'scatter', 'bubble'].includes(c.chartType);
+      return xy ? c.points.length > 0 : c.series.length > 0;
+    }
     return true;
   });
 }
@@ -2685,6 +2738,17 @@ app.post('/api/ai/slide', auth, async (req, res) => {
   const proofMode = String(settings.exampleType || '').toLowerCase() === 'proof';
   const stemFocus = /math|physics|program|algorithm|computer|data|statistics|calculus|algebra|geometry|numerical|machine learning|ai|engineering|cryptography|proof|equation|formula|theorem|derivative|integral|linear algebra|probability/i
     .test(`${topic} ${concept}`);
+  const subjectText = `${topic} ${concept}`.toLowerCase();
+  const dataFocus = /statistic|data|economics|econ|demograph|market|survey|population|climate|trend|distribution|frequency|percentage|budget|finance|trade|gdp|growth rate|poll/.test(subjectText);
+  const illustrativeFocus = /history|histor|war|revolution|empire|ancient|medieval|civiliz|politic|philosoph|literature|art|culture|religion|social|geograph|biograph|anecdote|language|law|ethics/.test(subjectText);
+  // Subject-aware guidance so the AI picks components on purpose, not at random.
+  const componentStrategy = stemFocus
+    ? 'This is a technical/quantitative subject: reach first for LaTeX (formulas, derivations), then a chart (bar/line/scatter for relationships and trends) or a labelled svg diagram, and code when it is a computing topic. Use a sticky note only for a single crucial formula caveat or mnemonic.'
+    : illustrativeFocus
+      ? 'This is a conceptual/humanities subject: reach first for one or two sticky notes carrying a memorable anecdote, date, name, or key takeaway, plus a comparison table (e.g. before/after, cause/effect) or a timeline; use an image to evoke the period/place, and use charts only if there is genuine data (e.g. populations, dates, magnitudes). Avoid LaTeX/code unless the topic truly needs it.'
+      : dataFocus
+        ? 'This is a data-driven subject: reach first for a chart that fits the data\'s job — bar for comparing categories, line for change over time, pie for parts of a whole, scatter/bubble for relationships — with a sticky note or table calling out the single most important reading. Only invent numbers that are realistic and clearly illustrative.'
+        : 'Pick the one or two components that most clarify THIS concept: a chart for quantities/relationships, a table for structured comparisons, a sticky note for a highlight or warning, latex for symbolic reasoning, an svg diagram for structure/flow, or an image to illustrate. Do not add a component that does not earn its place.';
   const visualPlan = decideAdaptiveVisualMode({
     topic,
     concept,
@@ -2721,6 +2785,8 @@ app.post('/api/ai/slide', auth, async (req, res) => {
    {"type":"table","headers":[string,...],"rows":[[string,...],...],"caption":string} |
    {"type":"latex","content":string (a DISPLAY formula in LaTeX, WITHOUT surrounding $),"caption":string} |
    {"type":"code","language":string,"content":string (a real, correct, well-formatted snippet with newlines)} |
+   {"type":"chart","chartType":"bar"|"pie"|"line"|"scatter"|"bubble","title":string,"series":[{"label":string,"value":number}] (for bar/pie),"points":[{"x":number,"y":number,"r":number,"label":string}] (for line/scatter/bubble; r only for bubble),"xLabel":string,"yLabel":string,"caption":string} |
+   {"type":"stickynote","color":"yellow"|"pink"|"blue"|"green"|"orange","title":string (short),"note":string (a highlight, key takeaway, mnemonic, warning, or historical anecdote)} |
   {"type":"svg","svg":"<svg...>","caption":string} |
   {"type":"image","prompt":string,"caption":string,"frame":"paper"|"polaroid"}
  ],
@@ -2736,6 +2802,9 @@ Rules:
 - Make the quiz genuinely CHALLENGING, not obvious: every option must be on-topic and plausible to someone who only half-understood the slide. Never make the correct answer the conspicuously longest or most detailed, and never make wrong options absurd or off-topic. Each wrong option is a common, tempting mistake that reveals a DIFFERENT misconception. A careless reader should be able to fall for a distractor; only careful reasoning from the slide's paragraphs should yield the right answer.
 - LENGTH: the slide MUST contain exactly ${paraCount} distinct paragraph(s) of prose (as separate "text" components), each about ${paragraphWords} words. Do not collapse them, and do not pad — each paragraph carries new substance. ${densityRule}
 - COHESION: the paragraphs must build on one another in order — introduce the idea, develop it, then apply or consolidate it — never restating the same point. The slide must also connect to the previous slides (briefly recall or build on them) and set up what comes next, so the whole presentation reads as one continuous, complementary lesson rather than isolated cards.
+- COMPONENT STRATEGY: choose support components deliberately to fit the subject and this specific concept — never scatter them at random, and never add one that does not clarify the idea. ${componentStrategy} Place the most important visual near the point it explains, and order components so the slide reads top-to-bottom as a single argument.
+- CHARTS: use a "chart" component when numbers, comparisons, trends, distributions or relationships are central. Pick the chartType by its job — bar (compare categories), line (change over time), pie (parts of a whole, ≤6 slices), scatter (relationship between two variables), bubble (relationship with a third magnitude as radius). Provide "series" [{label,value}] for bar/pie and "points" [{x,y[,r][,label]}] for line/scatter/bubble. Use realistic, clearly-labelled, illustrative values and always set a title and axis labels where relevant.
+- STICKY NOTES: use a "stickynote" for ONE punchy highlight, key takeaway, mnemonic, warning, or (for history/humanities) a vivid anecdote, date, or name. Keep it short; do not put a whole paragraph on it. Vary the color meaningfully (e.g. pink for a warning/common mistake, green for a takeaway, blue for a definition-style note).
 - TABLES: when using a table, keep it compact (3-6 rows, 2-6 columns), label headers clearly, and ensure every row directly supports the slide's teaching point.
 - QUIZ ALIGNMENT: if a table is included, it must directly help answer this slide's multiple-choice question or explain one likely misconception.
 - TABLE FORMAT: when a table appears, use exactly two columns labeled "Main idea" and "Different perspective"; each row should contrast the core point with a useful alternate angle or correction.
@@ -2786,7 +2855,7 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
       });
     }
     if (settings.imageDensity === 'text-only') {
-      slide.components = (slide.components || []).filter(c => !['svg', 'image', 'latex', 'code', 'table'].includes(c.type));
+      slide.components = (slide.components || []).filter(c => !['svg', 'image', 'latex', 'code', 'table', 'chart'].includes(c.type));
     }
     if (!visualPlan.allowImages) {
       slide.components = (slide.components || []).filter(c => c?.type !== 'image' && c?.type !== 'svg');
@@ -2831,7 +2900,7 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
       });
     }
     if (settings.imageDensity === 'text-only' && !proofMode) {
-      slide.components = slide.components.filter(c => !['latex', 'code', 'table'].includes(c.type));
+      slide.components = slide.components.filter(c => !['latex', 'code', 'table', 'chart'].includes(c.type));
     }
     if (proofMode && slideNumber % 4 !== 0 && !slide.components.some(c => c?.type === 'latex')) {
       slide.components.unshift({
