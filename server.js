@@ -2189,6 +2189,21 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
 
   if (!geminiEnabled && !deepseekEnabled) {
     const slide = makeFallbackSlide({ topic, concept, level, settings, slideNumber, totalSlides, branch });
+    slide.components = sanitizeComponents(slide.components);
+    if (isTimeTravelActivity && settings.imageDensity !== 'text-only') {
+      enforceTimeTravelImagePolicy(slide, {
+        topic,
+        concept,
+        slideNumber,
+        totalSlides,
+        customInstructions: settings.customInstructions || ''
+      });
+      slide.components = await fillImages(slide.components);
+    }
+    if (settings.imageDensity === 'text-only') {
+      slide.components = (slide.components || []).filter(c => !['svg', 'image', 'latex', 'code', 'table'].includes(c.type));
+    }
+    enforceSlideVisualPolicy(slide, history, slideNumber);
     const genId = `${gameId || 'nogame'}-slide${slideNumber}-fallback`;
     saveGeneration('slides', genId, {
       username: req.user.username,
