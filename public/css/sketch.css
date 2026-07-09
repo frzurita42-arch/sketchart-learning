@@ -173,7 +173,11 @@ label.field > span { display: block; margin-bottom: 4px; }
   box-shadow: 5px 6px 0 rgba(45,42,38,.25);
   padding: 26px 28px;
 }
-.slide h2 { margin-bottom: 14px; }
+.slide h2 {
+  margin-bottom: 14px;
+  border-top: 3px dashed var(--ink);
+  padding-top: 10px;
+}
 .slide-comp { margin-bottom: 16px; }
 .comp-keypoints ul { padding-left: 24px; }
 .comp-keypoints li { margin-bottom: 4px; }
