@@ -1276,14 +1276,10 @@ async function finishGame() {
           <div class="stat-tile"><div class="big">${mins}</div>time</div>
         </div>
         ${shareUrl ? `<div class="share-box"><div><b>Shareable report</b><br><a href="${esc(shareUrl)}" target="_blank" rel="noreferrer">${esc(shareUrl)}</a></div><button class="btn small" id="copy-share">Copy link</button></div>` : ''}
-        <div class="summary-grid">
-          <div class="summary-card"><b>Question summary</b><p>${esc(questionSummary || `Questions focused on ${g.concept} at ${g.level}.`)}</p></div>
-          <div class="summary-card"><b>Answer summary</b><p>${esc(answerSummary || `${correct}/${total} answers were correct.`)}</p></div>
-        </div>
         ${Array.isArray(rec?.aiNotes) && rec.aiNotes.length ? `<div class="quiz-feedback" style="margin-top:14px"><b>AI notes</b><ul style="padding-left:22px;margin-top:6px">${rec.aiNotes.map(n => `<li>${esc(n)}</li>`).join('')}</ul></div>` : ''}
         <div class="table-wrap"><table class="sketch">
-          <tr><th>#</th><th>Question</th><th>Your answer</th><th>Result</th><th>Question summary</th><th>Answer summary</th><th>AI notes</th></tr>
-          ${g.answers.map(a => `<tr><td>${a.slide}</td><td>${esc(a.question)}</td><td>${esc(a.chosen)}</td><td>${a.correct ? '✔' : '✘'}</td><td class="clamped">${esc(questionSummary)}</td><td class="clamped">${esc(answerSummary)}</td><td class="clamped">${esc(Array.isArray(rec?.aiNotes) ? rec.aiNotes.join(' · ') : '')}</td></tr>`).join('')}
+          <tr><th>#</th><th>Question</th><th>Your answer</th><th>Result</th><th>AI notes</th></tr>
+          ${g.answers.map(a => `<tr><td>${a.slide}</td><td>${esc(a.question)}</td><td>${esc(a.chosen)}</td><td>${a.correct ? '✔' : '✘'}</td><td class="clamped">${esc(Array.isArray(rec?.aiNotes) ? rec.aiNotes.join(' · ') : '')}</td></tr>`).join('')}
         </table></div>
         ${rec ? `
           <div class="quiz-feedback" style="margin-top:18px">

@@ -910,9 +910,6 @@ app.get('/report/:shareId', async (req, res) => {
   if (!game) return res.status(404).send('<h1>Report not found</h1>');
 
   const esc = v => String(v ?? '').replace(/[&<>\"]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
-  const splitList = value => Array.isArray(value) ? value : String(value || '').split(',').map(s => s.trim()).filter(Boolean);
-  const questionItems = splitList(game.questionSummary);
-  const answerItems = splitList(game.answerSummary);
   const notes = Array.isArray(game.aiNotes) ? game.aiNotes : (game.aiNotes ? [game.aiNotes] : []);
   const recs = game.recommendations || {};
   const dateTime = `${esc(game.finishedDate || new Date(game.finishedAt).toLocaleDateString())} ${esc(game.finishedTime || new Date(game.finishedAt).toLocaleTimeString())}`;
@@ -944,10 +941,6 @@ app.get('/report/:shareId', async (req, res) => {
     <div class="grid">
       <div class="box">
         <h2>Summary</h2>
-        <p><b>Question summary:</b></p>
-        <ul class="list">${questionItems.length ? questionItems.map(n => `<li>${esc(n)}</li>`).join('') : '<li>No question summary saved.</li>'}</ul>
-        <p><b>Answer summary:</b></p>
-        <ul class="list">${answerItems.length ? answerItems.map(n => `<li>${esc(n)}</li>`).join('') : '<li>No answer summary saved.</li>'}</ul>
         <p><b>Coach summary:</b> ${esc(recs.summary || 'No coach summary saved.')}</p>
         <h2>Question Table</h2>
         <div style="overflow:auto"><table>
