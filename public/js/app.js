@@ -253,9 +253,9 @@ function renderSuggestedTopicSection() {
   return `
     <div style="max-width:760px;margin:36px auto 0">
       <h4 style="margin:0 0 2px;opacity:.9">Suggested topic</h4>
-      ${hasSuggestion ? `<p style="margin:0 0 8px;font-weight:700">${esc(s.topic)}</p>` : ''}
       <div class="card" style="max-width:760px;margin:0 auto 0;padding:14px 16px">
-      <div class="slide-actions" style="justify-content:flex-start;margin-bottom:10px">
+      <div class="slide-actions" style="justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+        ${hasSuggestion ? `<p style="margin:0;font-weight:700">${esc(s.topic)}</p>` : ''}
         <button class="btn small blue" id="refresh-suggested-topic">↻ Refresh suggestion</button>
       </div>
       ${hasSuggestion ? `
