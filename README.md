@@ -23,13 +23,26 @@ wrong answers branch into remediation targeted at the exact misconception you re
 ```bash
 cd sketchlearn
 npm install
-cp .env.example .env      # then put your DeepSeek API key in .env
+cp .env.example .env      # then set at least one text provider key
 npm start                 # → http://localhost:3000
 ```
 
 For production on Vercel, set `DATABASE_URL` (or `POSTGRES_URL`).
 When present, the server stores users, game records, and home recommendation caches in Postgres.
 Without it, the app falls back to local JSON files in `data/`.
+
+## API keys by activity
+
+Set these in Vercel for **Production, Preview, and Development** so every activity works the same everywhere:
+
+- Required for all text-based activities (learning paths, Time Travel story slides, recommendations, coach chat):
+   - `GEMINI_API_KEY` **or** `DEEPSEEK_API_KEY`
+- Optional for generated slide images:
+   - `IMAGE_API_KEY` (plus optional `IMAGE_API_URL`, `IMAGE_API_MODEL`)
+- Optional for Claude-drawn SVG diagrams:
+   - `ANTHROPIC_API_KEY` (plus optional `ANTHROPIC_MODEL`)
+
+If no text provider key is configured, the app now serves built-in fallback content instead of hard-failing.
 
 Sign in with `admin` / `123456`, then change the password from **My stats → Change my password**
 (or from the dashboard) and add users from the **Dashboard**.

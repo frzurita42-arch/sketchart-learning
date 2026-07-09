@@ -1122,6 +1122,136 @@ function makeFallbackLearningPath(topic, wantedLevels) {
   };
 }
 
+function makeFallbackLevelConcepts(topic, level, wanted, avoidConcepts = []) {
+  const normalizedTopic = String(topic || 'General studies').trim() || 'General studies';
+  const avoidSet = new Set((Array.isArray(avoidConcepts) ? avoidConcepts : []).map(v => String(v || '').trim().toLowerCase()).filter(Boolean));
+  const seeds = [
+    'Foundations and key terms',
+    'Trade-offs and constraints',
+    'Practical workflow',
+    'Common mistakes and fixes',
+    'Evidence and measurement',
+    'Case study and reflection',
+    'Comparison with alternatives',
+    'Implementation checklist'
+  ];
+  const concepts = [];
+  for (const seed of seeds) {
+    const name = `${normalizedTopic}: ${seed}`;
+    if (avoidSet.has(name.toLowerCase())) continue;
+    concepts.push({
+      name,
+      blurb: `Fallback concept for ${level} practice`
+    });
+    if (concepts.length >= wanted) break;
+  }
+  return {
+    level,
+    description: `Fallback concept refresh for ${normalizedTopic} at ${level} level.`,
+    concepts
+  };
+}
+
+function makeFallbackSlide({ topic, concept, level, settings = {}, slideNumber, totalSlides, branch }) {
+  const paragraphWords = { brief: '40-60', medium: '70-100', detailed: '110-150' }[settings.paragraphLength] || '70-100';
+  const titleBase = String(concept || topic || 'Learning concept').trim();
+  const title = titleBase.split(/\s+/).slice(0, 8).join(' ');
+  const adaptationLine = branch
+    ? (branch.correct
+      ? 'You answered correctly on the previous step, so this slide goes a level deeper.'
+      : `This slide targets a common misconception: ${String(branch.misconception || 'mixing up the core idea with a related one')}.`)
+    : 'This slide builds a strong baseline before moving to harder cases.';
+
+  const components = [
+    { type: 'text', content: `At ${level} level, this step focuses on ${concept}. The goal is to connect the idea to real choices, constraints, and outcomes, not just memorize definitions. Read each paragraph and look for cause-effect logic you can reuse in new situations. (${paragraphWords} style)` },
+    { type: 'text', content: `${adaptationLine} Use the topic context (${topic}) to ask: what changes, what stays stable, and what evidence would confirm your interpretation? This comparison mindset prevents shallow pattern matching and improves transfer to unfamiliar examples.` },
+    { type: 'text', content: `Before the next slide, summarize the concept in one sentence, then test it on a small scenario. If your explanation predicts outcomes and trade-offs, your understanding is likely solid; if not, revisit the key mechanism and assumptions.` }
+  ];
+
+  return {
+    title,
+    summary: `Fallback slide ${slideNumber}/${totalSlides} reinforcing ${concept} at ${level} level while AI providers are unavailable.`,
+    components,
+    quiz: {
+      question: `Which strategy best shows real understanding of ${concept}?`,
+      options: [
+        {
+          text: 'Apply the concept to a new scenario and justify assumptions',
+          correct: true,
+          explanation: 'Correct. Transfer to a new case with explicit assumptions shows durable understanding.',
+          misconception: ''
+        },
+        {
+          text: 'Memorize terms without testing them in context',
+          correct: false,
+          explanation: 'Definitions help, but context-free memorization usually breaks under variation.',
+          misconception: 'Assumes recall is the same as understanding'
+        },
+        {
+          text: 'Skip constraints and focus only on ideal outcomes',
+          correct: false,
+          explanation: 'Ignoring constraints leads to unrealistic conclusions and weak decisions.',
+          misconception: 'Treats simplified models as complete reality'
+        },
+        {
+          text: 'Pick the first plausible interpretation and move on',
+          correct: false,
+          explanation: 'Fast intuition is useful, but untested interpretations often hide errors.',
+          misconception: 'Confuses plausibility with verification'
+        }
+      ]
+    }
+  };
+}
+
+function makeFallbackRecommendation({ topic, concept, level, correct, total, slides = [] }) {
+  const safeTotal = Math.max(1, Number(total) || 1);
+  const safeCorrect = Math.max(0, Number(correct) || 0);
+  const ratio = safeCorrect / safeTotal;
+  const questionSummary = slides.map(s => String(s.question || '').trim()).filter(Boolean).slice(0, 3);
+  const answerSummary = slides.map(s => String(s.chosen || '').trim()).filter(Boolean).slice(0, 3);
+  const nextLevelMap = {
+    Beginner: 'Lower Intermediate',
+    'Lower Intermediate': 'Upper Intermediate',
+    'Upper Intermediate': 'Advanced',
+    Advanced: 'PhD',
+    PhD: 'PhD'
+  };
+  const nextLevel = nextLevelMap[level] || level || 'Upper Intermediate';
+  const summary = ratio >= 0.75
+    ? `Strong work on ${concept}. Your score suggests you are ready to deepen accuracy and speed on more complex variants.`
+    : `You are building momentum on ${concept}. A short targeted review should make your next attempt much more stable.`;
+
+  return {
+    summary,
+    questionSummary,
+    answerSummary,
+    aiNotes: [
+      `Current focus: ${topic} / ${concept} at ${level}.`,
+      'Fallback coaching is active because AI providers are temporarily unavailable.',
+      'Use one quick recap and one new example before replaying the activity.'
+    ],
+    recommendations: [
+      'Rewrite the core idea in one sentence and list two assumptions.',
+      'Practice one new scenario and explain trade-offs out loud.',
+      'Replay with medium paragraph length and balanced visuals for retention.'
+    ],
+    nextConcepts: [
+      { name: `${concept}: applied scenario analysis`, level: nextLevel },
+      { name: `${concept}: edge cases and failure modes`, level: nextLevel }
+    ]
+  };
+}
+
+function makeFallbackCoachReply(progress = []) {
+  const recent = Array.isArray(progress) ? progress.slice(-3) : [];
+  if (!recent.length) {
+    return 'I can still coach you while AI providers are offline. Start with a Beginner or Lower Intermediate concept, keep slides to 6-8, and use balanced visuals. After your first run, I can help you tune difficulty and pacing.';
+  }
+  const latest = recent[recent.length - 1];
+  return `I can still coach you while AI providers are offline. Your latest activity was ${latest.topic} / ${latest.concept} at ${latest.level} with score ${latest.score}. Next, keep the same topic, lower complexity one step if accuracy was low, and run 6-8 slides with balanced visuals. Then retry at your original level.`;
+}
+
 // Strip anything executable from AI-generated SVG before it reaches the browser.
 function sanitizeSvg(svg) {
   if (typeof svg !== 'string') return '';
@@ -1675,6 +1805,10 @@ app.post('/api/ai/path/level-refresh', auth, async (req, res) => {
   const recent = games.map(g => `- ${g.topic} / ${g.concept} (${g.level}): ${g.correct}/${g.total}`).join('\n');
   const avoid = (Array.isArray(avoidConcepts) ? avoidConcepts : []).map(String).filter(Boolean).slice(0, 40);
 
+  if (!geminiEnabled && !deepseekEnabled) {
+    return res.json(makeFallbackLevelConcepts(topic, level, wanted, avoid));
+  }
+
   try {
     const result = await generateStructured([
       {
@@ -1794,6 +1928,24 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
       : `\nThe learner just answered the previous quiz WRONG ("${branch.chosenText}"), revealing this misconception: "${branch.misconception}". This slide must REDIRECT them: address that specific misconception head-on, re-explain the underlying idea from a different angle, then move forward.`;
   }
 
+  if (!geminiEnabled && !deepseekEnabled) {
+    const slide = makeFallbackSlide({ topic, concept, level, settings, slideNumber, totalSlides, branch });
+    const genId = `${gameId || 'nogame'}-slide${slideNumber}-fallback`;
+    saveGeneration('slides', genId, {
+      username: req.user.username,
+      topic,
+      concept,
+      level,
+      settings,
+      slideNumber,
+      branch: branch || null,
+      fallback: true,
+      slide,
+      createdAt: new Date().toISOString()
+    });
+    return res.json(slide);
+  }
+
   const user = `Topic: ${topic}\nConcept being taught: ${concept}\nAudience level: ${level}\nThis is slide ${slideNumber} of ${totalSlides}.${slideNumber >= totalSlides ? ' This is the FINAL content slide: wrap up the concept and make the quiz a synthesis question.' : ''}\n${historyText}${branchText}`;
 
   try {
@@ -1823,6 +1975,11 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
 app.post('/api/ai/recommend', auth, async (req, res) => {
   const { topic, concept, level, correct, total, durationSec, slides = [] } = req.body || {};
   const history = await recentUserGames(req.user.username, 12);
+  if (!geminiEnabled && !deepseekEnabled) {
+    const fallback = makeFallbackRecommendation({ topic, concept, level, correct, total, slides });
+    saveGeneration('recommendations', crypto.randomUUID(), { username: req.user.username, topic, concept, result: fallback, fallback: true, createdAt: new Date().toISOString() });
+    return res.json(fallback);
+  }
   try {
     const result = await generateStructured([
       {
@@ -1862,6 +2019,9 @@ app.post('/api/ai/chat', auth, async (req, res) => {
     date: g.finishedAt, topic: g.topic, concept: g.concept, level: g.level,
     score: `${g.correct}/${g.total}`, durationSec: g.durationSec
   }));
+  if (!geminiEnabled && !deepseekEnabled) {
+    return res.json({ reply: makeFallbackCoachReply(progress) });
+  }
   try {
     const reply = await generateText([
       {
