@@ -1302,7 +1302,10 @@ function summarizeSlideVisuals(slide) {
         return `table:${toText(c.caption)}::${toText(headers)}::${toText(firstRow)}::${toText(secondRow)}`.slice(0, 220);
       }
       if (c.type === 'svg') return `svg:${toText(c.caption)}::${toText(String(c.svg || '').replace(/\s+/g, ' ').slice(0, 120))}`.slice(0, 220);
-      if (c.type === 'image') return `image:${toText(c.caption || c.prompt || c.alt)}::${toText(c.prompt || '')}`.slice(0, 220);
+      if (c.type === 'image') {
+        const urlHead = toText(String(c.url || '').slice(0, 180));
+        return `image:${toText(c.caption || c.prompt || c.alt)}::${toText(c.prompt || '')}::${urlHead}`.slice(0, 300);
+      }
       if (c.type === 'latex') return `latex:${toText(c.caption || '')}::${toText(c.content || '')}`.slice(0, 220);
       if (c.type === 'code') return `code:${toText(c.language)}:${toText(c.content).split('\n')[0]}`.slice(0, 180);
       return '';

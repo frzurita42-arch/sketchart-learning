@@ -1323,7 +1323,10 @@ function componentVisualSignature(component) {
     const svgLead = clean(String(component.svg || '').replace(/\s+/g, ' ').slice(0, 120));
     return `svg:${clean(component.caption)}::${svgLead}`.slice(0, 260);
   }
-  if (component.type === 'image') return `image:${clean(component.caption || component.prompt || component.alt)}::${clean(component.prompt || '')}`.slice(0, 260);
+  if (component.type === 'image') {
+    const urlHead = clean(String(component.url || '').slice(0, 180));
+    return `image:${clean(component.caption || component.prompt || component.alt)}::${clean(component.prompt || '')}::${urlHead}`.slice(0, 320);
+  }
   if (component.type === 'latex') return `latex:${clean(component.caption || '')}::${clean(component.content || '')}`.slice(0, 260);
   if (component.type === 'code') return `code:${clean(component.language)}:${clean(String(component.content || '').split('\n')[0])}`.slice(0, 220);
   return '';
@@ -1403,7 +1406,9 @@ function enforceSlideVisualPolicy(slide, history = [], slideNumber = 1) {
   }
   if (oneVisual.type === 'image') {
     oneVisual.caption = `Slide ${slideNumber}: ${String(oneVisual.caption || 'Illustration').trim()}`;
-    if (oneVisual.prompt) oneVisual.prompt = `Slide ${slideNumber} focus. ${String(oneVisual.prompt).trim()}`;
+    const seedPrompt = `Slide ${slideNumber} focus. ${String(oneVisual.prompt || oneVisual.caption || slide.title || 'time travel concept').trim()}`;
+    oneVisual.prompt = seedPrompt;
+    oneVisual.url = fallbackImageDataUrl(seedPrompt, oneVisual.caption);
     return;
   }
   if (oneVisual.type === 'latex') {
