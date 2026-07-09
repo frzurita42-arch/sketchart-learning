@@ -105,16 +105,37 @@ function ensureDataDirs() {
 }
 
 const dbEnabled = hasConfiguredKey(DATABASE_URL);
-const pgPool = dbEnabled
+let pgPool = dbEnabled
   ? new Pool({
       connectionString: DATABASE_URL,
-      ssl: /localhost|127\.0\.0\.1/.test(DATABASE_URL) ? false : { rejectUnauthorized: false }
+      ssl: /localhost|127\.0\.0\.1/.test(DATABASE_URL) ? false : { rejectUnauthorized: false },
+      // Cap how long we wait to establish a connection so a truly unreachable DB fails
+      // fast at boot (then we downgrade to file storage) instead of hanging. Individual
+      // slow queries (e.g. a cold-starting free-tier DB) are bounded per-call by
+      // withDbTimeout so the boot DDL is never killed mid-flight.
+      max: 5,
+      connectionTimeoutMillis: 10000,
+      idleTimeoutMillis: 30000
     })
   : null;
+
+if (pgPool) {
+  // A pool 'error' on an idle client would otherwise crash the process.
+  pgPool.on('error', (err) => console.error('Postgres pool error:', err.message));
+}
 
 async function dbQuery(text, params = []) {
   if (!pgPool) throw new Error('Database is not configured');
   return pgPool.query(text, params);
+}
+
+// Bound a DB operation so a slow/hung query rejects quickly and callers can fall back.
+function withDbTimeout(promise, ms = 8000, label = 'DB operation') {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 async function initDatabase() {
@@ -322,45 +343,55 @@ async function readGames() {
   }));
 }
 
+function insertGameFile(record) {
+  const games = readJSON('games.json', []);
+  games.push(record);
+  writeJSON('games.json', games);
+}
+
 async function insertGame(record) {
   if (!pgPool) {
-    const games = readJSON('games.json', []);
-    games.push(record);
-    writeJSON('games.json', games);
+    insertGameFile(record);
     return;
   }
-  await dbQuery(
-    `INSERT INTO games (
-      id, share_id, share_url, username, finished_at, finished_date, finished_time,
-      topic, concept, level, settings, slides, correct, total, duration_sec,
-      recommendations, question_summary, answer_summary, ai_notes
-    ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,
-      $8,$9,$10,$11,$12,$13,$14,$15,
-      $16,$17,$18,$19
-    )`,
-    [
-      record.id,
-      record.shareId,
-      record.shareUrl,
-      record.username,
-      record.finishedAt,
-      record.finishedDate,
-      record.finishedTime,
-      record.topic,
-      record.concept,
-      record.level,
-      record.settings || null,
-      record.slides || null,
-      record.correct,
-      record.total,
-      record.durationSec,
-      record.recommendations || null,
-      record.questionSummary || null,
-      record.answerSummary || null,
-      record.aiNotes || null
-    ]
-  );
+  try {
+    await withDbTimeout(dbQuery(
+      `INSERT INTO games (
+        id, share_id, share_url, username, finished_at, finished_date, finished_time,
+        topic, concept, level, settings, slides, correct, total, duration_sec,
+        recommendations, question_summary, answer_summary, ai_notes
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,
+        $8,$9,$10,$11,$12,$13,$14,$15,
+        $16,$17,$18,$19
+      )`,
+      [
+        record.id,
+        record.shareId,
+        record.shareUrl,
+        record.username,
+        record.finishedAt,
+        record.finishedDate,
+        record.finishedTime,
+        record.topic,
+        record.concept,
+        record.level,
+        record.settings || null,
+        record.slides || null,
+        record.correct,
+        record.total,
+        record.durationSec,
+        record.recommendations || null,
+        record.questionSummary || null,
+        record.answerSummary || null,
+        record.aiNotes || null
+      ]
+    ), 8000, 'Save game');
+  } catch (e) {
+    // DB slow/unreachable: don't lose the run — persist to file as a backup and succeed.
+    console.error('DB insert failed; saving run to file storage instead:', e.message);
+    insertGameFile(record);
+  }
 }
 
 async function deleteGameRecord(gameId) {
@@ -2861,6 +2892,7 @@ async function bootstrapPersistence() {
     return;
   }
 
+  try {
   await initDatabase();
 
   let dbUsers = await loadUsers();
@@ -2931,6 +2963,18 @@ async function bootstrapPersistence() {
       DEFAULT_HOME_TOPIC_POOL
     );
     if (Object.keys(homeFile.users || {}).length) await writeHomeTopicsStore(homeFile);
+  }
+  } catch (e) {
+    // DB configured but unreachable/slow at boot: don't crash — run on file storage so
+    // the site stays up and saves still work (see insertGame's file fallback).
+    console.error('Database bootstrap failed; falling back to file storage for this run:', e.message);
+    try { await pgPool.end(); } catch { /* ignore */ }
+    pgPool = null;
+    if (!Array.isArray(users) || !users.length) {
+      users = [makeUser('admin', '123456', 'admin')];
+      writeJSON('users.json', users);
+      console.log('Seeded default admin user (admin / 123456)');
+    }
   }
 }
 
