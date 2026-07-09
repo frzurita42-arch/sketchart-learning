@@ -426,8 +426,8 @@ function renderStructuredExplanationsSection() {
         </div>
         <label class="field"><span style="display:none">Formula, concept, or example type</span>
           <input type="text" id="ml-prompt" value="${esc(ml.prompt || '')}" placeholder="e.g. Bayes theorem, Taylor series, shortest-path proof, decision tree split criteria" /></label>
-        <div class="settings-grid" style="margin-top:8px">
-          <div class="card" style="padding:12px">
+        <div class="card" style="padding:12px;margin-top:8px">
+          <div class="settings-compact">
             <label class="field"><span>Focus mode</span>
               <select id="ml-example-type">
                 <option value="proof" ${ml.exampleType === 'proof' ? 'selected' : ''}>Formal proof / derivation</option>
@@ -446,8 +446,6 @@ function renderStructuredExplanationsSection() {
                 <option value="standard" ${ml.complexity === 'standard' ? 'selected' : ''}>Standard</option>
                 <option value="scholarly" ${ml.complexity === 'scholarly' ? 'selected' : ''}>Scholarly</option>
               </select></label>
-          </div>
-          <div class="card" style="padding:12px">
             <label class="field"><span>Slides</span>
               <input type="number" id="ml-slides" min="2" max="20" value="${Math.min(20, Math.max(2, parseInt(ml.totalSlides, 10) || 8))}" /></label>
             <label class="field"><span>Paragraph length</span>
@@ -469,7 +467,7 @@ function renderStructuredExplanationsSection() {
                 <option value="different-examples" ${ml.continuation === 'different-examples' ? 'selected' : ''}>Continue with different examples</option>
                 <option value="related-topics" ${ml.continuation === 'related-topics' ? 'selected' : ''}>Continue to related topics</option>
               </select></label>
-            <label class="field"><span><input type="checkbox" id="ml-alternate" ${ml.alternateVisualMath ? 'checked' : ''} style="width:auto;margin-right:8px" />Alternate visual explanation pages with math/proof pages</span></label>
+            <label class="field alt-row"><span><input type="checkbox" id="ml-alternate" ${ml.alternateVisualMath ? 'checked' : ''} style="width:auto;margin-right:8px" />Alternate visual explanation pages with math/proof pages</span></label>
           </div>
         </div>
         <div class="slide-actions" style="justify-content:flex-start;margin-top:10px">
