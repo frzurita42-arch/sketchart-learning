@@ -1604,12 +1604,13 @@ function makeFallbackTable(slide, context = {}) {
 
 function makeFallbackProofLatex({ topic = '', concept = '', slideNumber = 1, branch = null } = {}) {
   const text = `${topic} ${concept}`.toLowerCase();
+  const phase = ((Math.max(1, Number(slideNumber) || 1) - 1) % 3) + 1;
   const correction = branch?.correct
-    ? '\\text{continue from the previous line}'
-    : '\\text{repair the missing step}';
+    ? '\\text{cont.}'
+    : '\\text{fix gap}';
   const tailComment = branch?.correct
-    ? '\\text{then deepen the result}'
-    : '\\text{then resume the derivation}';
+    ? '\\text{extend}'
+    : '\\text{resume}';
 
   if (/taylor/.test(text)) {
     if (slideNumber <= 1) {
@@ -1629,51 +1630,185 @@ R_n(x) &= f(x) - P_n(x) && \text{isolate the remainder} \\
   }
 
   if (/bayes|diagnostic|test/.test(text)) {
+    if (phase === 1) {
+      return String.raw`\begin{aligned}
+P(H\mid E) &= \frac{P(E\mid H)P(H)}{P(E)} && \text{Bayes update} \\
+P(E) &= P(E\mid H)P(H)+P(E\mid \neg H)P(\neg H) && \text{total evidence} \\
+&&& ${correction}
+\end{aligned}`;
+    }
+    if (phase === 2) {
+      return String.raw`\begin{aligned}
+P(H\mid E) &= \frac{P(E\mid H)P(H)}{P(E\mid H)P(H)+P(E\mid\neg H)P(\neg H)} && \text{substitute } P(E) \\
+&= \frac{\text{sensitivity}\cdot\text{prior}}{\text{sensitivity}\cdot\text{prior} + (1-\text{specificity})(1-\text{prior})} && \text{diagnostic form} \\
+&&& ${tailComment}
+\end{aligned}`;
+    }
     return String.raw`\begin{aligned}
-P(H\mid E) &= \frac{P(E\mid H)P(H)}{P(E)} && \text{update belief from evidence} \\
-P(E) &= P(E\mid H)P(H) + P(E\mid \neg H)P(\neg H) && \text{normalize by all cases} \\
-${correction} && ${tailComment}
+	ext{Odds}(H\mid E) &= \text{Odds}(H)\cdot\frac{P(E\mid H)}{P(E\mid\neg H)} && \text{odds form} \\
+\log\text{Odds}(H\mid E) &= \log\text{Odds}(H)+\log\text{LR}(E) && \text{additive evidence} \\
+&&& ${tailComment}
 \end{aligned}`;
   }
 
   if (/derivative|integral|calculus|series|limit|function|approximation/.test(text)) {
+    if (phase === 1) {
+      return String.raw`\begin{aligned}
+f'(x) &= \lim_{h\to 0}\frac{f(x+h)-f(x)}{h} && \text{definition} \\
+&= \lim_{h\to 0}\left(\frac{f(x+h)-f(x)}{h}\right) && \text{set up simplification} \\
+&&& ${correction}
+\end{aligned}`;
+    }
+    if (phase === 2) {
+      return String.raw`\begin{aligned}
+f(x+h) &= f(x) + hf'(x) + O(h^2) && \text{local expansion} \\
+\frac{f(x+h)-f(x)}{h} &= f'(x) + O(h) && \text{divide by } h \\
+\lim_{h\to 0}\frac{f(x+h)-f(x)}{h} &= f'(x) && ${tailComment}
+\end{aligned}`;
+    }
     return String.raw`\begin{aligned}
-f'(x) &= \lim_{h\to 0}\frac{f(x+h)-f(x)}{h} && \text{start from the definition} \\
-&= \lim_{h\to 0}\Bigl(\frac{f(x+h)-f(x)}{h}\Bigr) && \text{same ratio, rewritten} \\
-&\text{Use algebra or expansion to simplify the numerator.} && ${tailComment}
+\Delta f &\approx f'(x)\,\Delta x && \text{linear approximation} \\
+f(x+\Delta x) &\approx f(x) + f'(x)\,\Delta x && \text{prediction step} \\
+	ext{error} &= O((\Delta x)^2) && ${tailComment}
 \end{aligned}`;
   }
 
   if (/matrix|vector|linear algebra|eigen|basis|dimension/.test(text)) {
-    return String.raw`\begin{aligned}
+    if (phase === 1) {
+      return String.raw`\begin{aligned}
 A\mathbf{x} &= \lambda\mathbf{x} && \text{eigenvector relation} \\
-(A-\lambda I)\mathbf{x} &= \mathbf{0} && \text{move everything to one side} \\
-\det(A-\lambda I) &= 0 && \text{solve for the allowed } \lambda
+(A-\lambda I)\mathbf{x} &= \mathbf{0} && \text{move to one side} \\
+&&& ${correction}
+\end{aligned}`;
+    }
+    if (phase === 2) {
+      return String.raw`\begin{aligned}
+\det(A-\lambda I) &= 0 && \text{characteristic equation} \\
+\lambda_1,\dots,\lambda_n &\text{ solve this polynomial} && \text{eigenvalue candidates} \\
+&&& ${tailComment}
+\end{aligned}`;
+    }
+    return String.raw`\begin{aligned}
+\mathbf{x} &= c_1\mathbf{v}_1 + \cdots + c_n\mathbf{v}_n && \text{expand in eigenbasis} \\
+A^k\mathbf{x} &= c_1\lambda_1^k\mathbf{v}_1 + \cdots + c_n\lambda_n^k\mathbf{v}_n && \text{power action} \\
+&&& ${tailComment}
 \end{aligned}`;
   }
 
   if (/probability|statistics|random|variance|expectation|distribution/.test(text)) {
+    if (phase === 1) {
+      return String.raw`\begin{aligned}
+\mathbb{E}[X] &= \sum_x x\,P(X=x) && \text{weighted mean} \\
+\mu &= \mathbb{E}[X] && \text{notation} \\
+&&& ${correction}
+\end{aligned}`;
+    }
+    if (phase === 2) {
+      return String.raw`\begin{aligned}
+\mathrm{Var}(X) &= \mathbb{E}[(X-\mu)^2] && \text{definition} \\
+&= \mathbb{E}[X^2] - \mu^2 && \text{expanded form} \\
+&&& ${tailComment}
+\end{aligned}`;
+    }
     return String.raw`\begin{aligned}
-\mathbb{E}[X] &= \sum_x x\,P(X=x) && \text{weighted average of outcomes} \\
-\mathrm{Var}(X) &= \mathbb{E}[(X-\mu)^2] && \text{spread around the mean} \\
-	ext{If needed, expand the square and collect terms.} && ${tailComment}
+z &= \frac{x-\mu}{\sigma} && \text{standardize} \\
+P(X\le x) &= \Phi(z) && \text{map to the normal CDF} \\
+&&& ${tailComment}
 \end{aligned}`;
   }
 
   if (/physics|force|energy|momentum|motion|wave|electric|field/.test(text)) {
-    return String.raw`\begin{aligned}
+    if (phase === 1) {
+      return String.raw`\begin{aligned}
 F &= ma && \text{Newton's second law} \\
-a &= \frac{\Delta v}{\Delta t} && \text{acceleration from velocity change} \\
-  ext{Combine the relation with the problem's givens.} && ${tailComment}
+a &= \frac{\Delta v}{\Delta t} && \text{kinematics link} \\
+&&& ${correction}
+\end{aligned}`;
+    }
+    if (phase === 2) {
+      return String.raw`\begin{aligned}
+W &= F\,d\cos\theta && \text{work by constant force} \\
+\Delta K &= W && \text{work-energy theorem} \\
+&&& ${tailComment}
+\end{aligned}`;
+    }
+    return String.raw`\begin{aligned}
+p &= m v && \text{momentum definition} \\
+\Delta p &= F\,\Delta t && \text{impulse relation} \\
+&&& ${tailComment}
 \end{aligned}`;
   }
 
   return String.raw`\begin{aligned}
-  ext{Claim: } & ${String(concept || topic || 'the result')} && \text{state the goal} \\
-  ext{Step 1: } & \text{state assumptions and definitions} && \text{set the starting point} \\
-  ext{Step 2: } & \text{derive the key relation} && ${correction} \\
-  ext{Step 3: } & \text{conclude the proof} && ${tailComment}
+	ext{Claim: } & ${String(concept || topic || 'the result')} && \text{goal} \\
+	ext{Step 1: } & \text{state assumptions and definitions} && \text{setup} \\
+	ext{Step 2: } & \text{derive the key relation} && ${correction} \\
+	ext{Step 3: } & \text{conclude the proof} && ${tailComment}
 \end{aligned}`;
+}
+
+function enforceLatexNarrativeCadence(slide, context = {}) {
+  if (!slide || !Array.isArray(slide.components)) return;
+
+  const proofMode = !!context.proofMode;
+  const stemFocus = !!context.stemFocus;
+  const slideNumber = Math.max(1, Number(context.slideNumber) || 1);
+  const history = Array.isArray(context.history) ? context.history : [];
+
+  const normalize = s => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const recentLatexRefs = history
+    .slice(-4)
+    .flatMap(h => Array.isArray(h?.visualRefs) ? h.visualRefs : [])
+    .filter(v => String(v || '').toLowerCase().startsWith('latex:'))
+    .map(v => normalize(v));
+
+  const textCount = slide.components.filter(c => c?.type === 'text' && String(c.content || '').trim()).length;
+  let latexComps = slide.components.filter(c => c?.type === 'latex');
+  if (!latexComps.length) return;
+
+  for (const comp of latexComps) {
+    const content = String(comp.content || '');
+    comp.content = content
+      .replace(/\\text\{continue from the previous line\}/gi, '\\text{cont.}')
+      .replace(/\\text\{repair the missing step\}/gi, '\\text{fix gap}')
+      .replace(/\\text\{then deepen the result\}/gi, '\\text{extend}')
+      .replace(/\\text\{then resume the derivation\}/gi, '\\text{resume}');
+    const shortCaption = String(comp.caption || '').replace(/^\s*slide\s*\d+\s*:\s*/i, '').trim();
+    comp.caption = shortCaption;
+  }
+
+  const firstLatex = latexComps[0];
+  const latexSig = normalize(String(firstLatex?.content || '')).slice(0, 120);
+  const repeatsRecentLatex = latexSig && recentLatexRefs.some(ref => ref.includes(latexSig));
+
+  const textOnlyConsolidation = (!proofMode && stemFocus && slideNumber % 3 === 0)
+    || (proofMode && slideNumber % 4 === 0 && textCount >= 2);
+
+  if (textOnlyConsolidation) {
+    slide.components = slide.components.filter(c => c?.type !== 'latex');
+    return;
+  }
+
+  if (repeatsRecentLatex) {
+    if (proofMode) {
+      firstLatex.content = makeFallbackProofLatex({
+        topic: context.topic || '',
+        concept: context.concept || '',
+        slideNumber,
+        branch: context.branch || null
+      });
+      firstLatex.caption = `Step ${slideNumber}`;
+      slide.components = slide.components.filter((c, idx) => c?.type !== 'latex' || idx === slide.components.indexOf(firstLatex));
+      return;
+    }
+    slide.components = slide.components.filter(c => c?.type !== 'latex');
+    return;
+  }
+
+  if (!proofMode && latexComps.length > 1) {
+    const keep = slide.components.indexOf(firstLatex);
+    slide.components = slide.components.filter((c, idx) => c?.type !== 'latex' || idx === keep);
+  }
 }
 
 function enforceVisualCyclePolicy(slide, context = {}) {
@@ -2389,11 +2524,13 @@ Rules:
 - If a LaTeX formula/proof block is included: ${equationDepth} Follow it with explanatory text that walks through the symbols and logic step-by-step.
 - If a LaTeX formula/proof block is included: ${equationDepth} Put the whole proof on the same slide in one displayed block when possible. Use short comments on the right of each line with aligned LaTeX, not separate captions or paragraphs that compete with the formula.
 - If the concept is mathematical or another topic where symbols clarify the reasoning, prefer a displayed LaTeX derivation even if the example is not explicitly a formal proof.
+- Across slides, vary representation naturally: include some text-only consolidation slides when a repeated formula would add little, and use formula slides only when symbols clarify a new step.
+- Never repeat the exact same displayed LaTeX block on consecutive slides; continue by adding or refining a different step.
 - IMAGE POLICY (adaptive): ${visualPlan.promptRule}
 - If including an image component, use a precise educational prompt that names the concept and the exact element to visualize. Avoid decorative prompts.
 - Any formula/proof/code explanation should be as substantial as the selected paragraph length setting; avoid tiny token examples for long-form settings.
 - ${stemFocus ? `${stemAlternation} For this STEM-heavy concept, include either a code snippet or a LaTeX formula/proof block, plus textual explanation tying them together. If the topic naturally benefits from symbolic math, prefer a proof/derivation page.` : 'Use STEM-style formula/code components only when they naturally fit the concept.'}
-- ${proofMode ? 'PROOF MODE: every slide must contain at least one displayed LaTeX proof or derivation block. Do not summarize the proof in prose only. Continue the derivation from the previous slide, and if the learner was wrong, repair the missing step explicitly.' : ''}
+- ${proofMode ? 'PROOF MODE: maintain proof continuity across slides. Use displayed LaTeX on most slides, but allow occasional text-only consolidation when it prevents repeating the same formula block. Continue by advancing or repairing one step at a time.' : ''}
 - ${isTimeTravelActivity
   ? 'This is a Time Travel activity slide: keep the explanation timeline-aware and use a table only if it genuinely clarifies the progression.'
   : "For non-time-travel activities, keep the explanation tied to the concept and the learner's previous answer."}
@@ -2418,6 +2555,7 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
   if (!geminiEnabled && !deepseekEnabled) {
     const slide = makeFallbackSlide({ topic, concept, level, settings, slideNumber, totalSlides, branch });
     slide.components = sanitizeComponents(slide.components);
+    enforceLatexNarrativeCadence(slide, { topic, concept, slideNumber, proofMode, stemFocus, history, branch });
     if (isTimeTravelActivity && visualPlan.allowImages) {
       enforceTimeTravelImagePolicy(slide, { topic, concept, slideNumber, totalSlides, customInstructions: settings.customInstructions || '' });
     } else if (visualPlan.allowImages && !slide.components.some(c => c?.type === 'image')) {
@@ -2459,6 +2597,7 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
   try {
     const slide = await generateStructured([{ role: 'system', content: system }, { role: 'user', content: user }], { temperature: 0.85, maxTokens: 8192 });
     slide.components = sanitizeComponents(slide.components);
+    enforceLatexNarrativeCadence(slide, { topic, concept, slideNumber, proofMode, stemFocus, history, branch });
     if (!visualPlan.allowImages) {
       slide.components = (slide.components || []).filter(c => c?.type !== 'image' && c?.type !== 'svg');
     }
@@ -2475,11 +2614,11 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
     if (settings.imageDensity === 'text-only' && !proofMode) {
       slide.components = slide.components.filter(c => !['latex', 'code', 'table'].includes(c.type));
     }
-    if (proofMode && !slide.components.some(c => c?.type === 'latex')) {
+    if (proofMode && slideNumber % 4 !== 0 && !slide.components.some(c => c?.type === 'latex')) {
       slide.components.unshift({
         type: 'latex',
         content: makeFallbackProofLatex({ topic, concept, slideNumber, branch }),
-        caption: `Proof step ${slideNumber}: ${String(concept || topic || 'Concept').trim().split(/\s+/).slice(0, 8).join(' ')}`
+        caption: `Step ${slideNumber}`
       });
     }
     if (visualPlan.allowImages) {
