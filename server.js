@@ -1613,7 +1613,7 @@ function makeFallbackProofLatex({ topic = '', concept = '', slideNumber = 1, bra
     : '\\text{resume}';
 
   if (/taylor/.test(text)) {
-    if (slideNumber <= 1) {
+    if (phase === 1) {
       return String.raw`\begin{aligned}
 f(x) &= P_n(x) + R_n(x) && \text{split into approximation + remainder} \\
 P_n(x) &= \sum_{k=0}^{n}\frac{f^{(k)}(a)}{k!}(x-a)^k && \text{Taylor polynomial around } a \\
@@ -1621,11 +1621,18 @@ R_n(x) &= f(x) - P_n(x) && ${correction} \\
 &= \frac{f^{(n+1)}(\xi)}{(n+1)!}(x-a)^{n+1} && ${tailComment}
 \end{aligned}`;
     }
-    return String.raw`\begin{aligned}
+    if (phase === 2) {
+      return String.raw`\begin{aligned}
 R_n(x) &= f(x) - P_n(x) && \text{isolate the remainder} \\
 &= f(x) - \sum_{k=0}^{n}\frac{f^{(k)}(a)}{k!}(x-a)^k && \text{substitute the polynomial} \\
 &= \frac{f^{(n+1)}(\xi)}{(n+1)!}(x-a)^{n+1}, \quad \xi \in (a,x) && ${correction} \\
 &\text{This remainder controls the error size.} && ${tailComment}
+\end{aligned}`;
+    }
+    return String.raw`\begin{aligned}
+\left|R_n(x)\right| &\le \frac{M}{(n+1)!}\left|x-a\right|^{n+1} && \text{bound with } M=\max|f^{(n+1)}| \\
+	ext{choose } n &\text{ so the bound } < \varepsilon && \text{target accuracy} \\
+&&& ${tailComment}
 \end{aligned}`;
   }
 
@@ -1645,7 +1652,7 @@ P(H\mid E) &= \frac{P(E\mid H)P(H)}{P(E\mid H)P(H)+P(E\mid\neg H)P(\neg H)} && \
 \end{aligned}`;
     }
     return String.raw`\begin{aligned}
-	ext{Odds}(H\mid E) &= \text{Odds}(H)\cdot\frac{P(E\mid H)}{P(E\mid\neg H)} && \text{odds form} \\
+  	ext{Odds}(H\mid E) &= \text{Odds}(H)\cdot\frac{P(E\mid H)}{P(E\mid\neg H)} && \text{odds form} \\
 \log\text{Odds}(H\mid E) &= \log\text{Odds}(H)+\log\text{LR}(E) && \text{additive evidence} \\
 &&& ${tailComment}
 \end{aligned}`;
@@ -1669,7 +1676,7 @@ f(x+h) &= f(x) + hf'(x) + O(h^2) && \text{local expansion} \\
     return String.raw`\begin{aligned}
 \Delta f &\approx f'(x)\,\Delta x && \text{linear approximation} \\
 f(x+\Delta x) &\approx f(x) + f'(x)\,\Delta x && \text{prediction step} \\
-	ext{error} &= O((\Delta x)^2) && ${tailComment}
+  	ext{error} &= O((\Delta x)^2) && ${tailComment}
 \end{aligned}`;
   }
 
@@ -1739,11 +1746,24 @@ p &= m v && \text{momentum definition} \\
 \end{aligned}`;
   }
 
-  return String.raw`\begin{aligned}
+  if (phase === 1) {
+    return String.raw`\begin{aligned}
 	ext{Claim: } & ${String(concept || topic || 'the result')} && \text{goal} \\
 	ext{Step 1: } & \text{state assumptions and definitions} && \text{setup} \\
-	ext{Step 2: } & \text{derive the key relation} && ${correction} \\
-	ext{Step 3: } & \text{conclude the proof} && ${tailComment}
+	ext{Step 2: } & \text{derive the first relation} && ${correction}
+\end{aligned}`;
+  }
+  if (phase === 2) {
+    return String.raw`\begin{aligned}
+	ext{Given } & \text{the previous relation} && \text{continue} \\
+	ext{Step 3: } & \text{transform into an equivalent form} && \text{algebra / logic} \\
+	ext{Step 4: } & \text{isolate the target expression} && ${tailComment}
+\end{aligned}`;
+  }
+  return String.raw`\begin{aligned}
+	ext{Final step: } & \text{substitute back and simplify} && \text{assemble result} \\
+	ext{Conclusion: } & ${String(concept || topic || 'the result')} && \text{proved} \\
+&&& ${tailComment}
 \end{aligned}`;
 }
 
@@ -1762,6 +1782,14 @@ function enforceLatexNarrativeCadence(slide, context = {}) {
     .filter(v => String(v || '').toLowerCase().startsWith('latex:'))
     .map(v => normalize(v));
 
+  const extractLatexBody = (ref) => {
+    const s = String(ref || '');
+    const i = s.indexOf('::');
+    if (i < 0) return '';
+    return normalize(s.slice(i + 2));
+  };
+  const recentLatexBodies = recentLatexRefs.map(extractLatexBody).filter(Boolean);
+
   const textCount = slide.components.filter(c => c?.type === 'text' && String(c.content || '').trim()).length;
   let latexComps = slide.components.filter(c => c?.type === 'latex');
   if (!latexComps.length) return;
@@ -1778,8 +1806,9 @@ function enforceLatexNarrativeCadence(slide, context = {}) {
   }
 
   const firstLatex = latexComps[0];
-  const latexSig = normalize(String(firstLatex?.content || '')).slice(0, 120);
-  const repeatsRecentLatex = latexSig && recentLatexRefs.some(ref => ref.includes(latexSig));
+  const latexCanonical = normalize(String(firstLatex?.content || '')).replace(/\\(begin|end)\{aligned\}/g, '').replace(/[{}]/g, '');
+  const latexSig = latexCanonical.slice(0, 140);
+  const repeatsRecentLatex = !!(latexSig && recentLatexBodies.some(body => body.includes(latexSig) || latexSig.includes(body.slice(0, 80))));
 
   const textOnlyConsolidation = (!proofMode && stemFocus && slideNumber % 3 === 0)
     || (proofMode && slideNumber % 4 === 0 && textCount >= 2);
