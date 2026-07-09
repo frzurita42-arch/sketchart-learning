@@ -727,15 +727,16 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_API_BASE = process.env.GEMINI_API_URL || 'https://generativelanguage.googleapis.com/v1beta';
 const GEMINI_TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || 'gemini-3.5-flash';
 const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image';
-const geminiEnabled = hasConfiguredKey(GEMINI_API_KEY);
-const deepseekEnabled = hasConfiguredKey(DEEPSEEK_API_KEY);
+const forceFallback = /^(1|true|yes)$/i.test(String(process.env.SKETCHLEARN_FORCE_FALLBACK || '').trim());
+const geminiEnabled = !forceFallback && hasConfiguredKey(GEMINI_API_KEY);
+const deepseekEnabled = !forceFallback && hasConfiguredKey(DEEPSEEK_API_KEY);
 
 // Optional image-generation backend (see .env.example). Priority: an explicit
 // OpenAI-compatible image provider, else Gemini's image model, else no images.
 const IMAGE_API_KEY = process.env.IMAGE_API_KEY;
 const IMAGE_API_URL = process.env.IMAGE_API_URL || 'https://api.openai.com/v1/images/generations';
 const IMAGE_API_MODEL = process.env.IMAGE_API_MODEL || 'gpt-image-1';
-const imageEnabled = hasConfiguredKey(IMAGE_API_KEY) || geminiEnabled;
+const imageEnabled = !forceFallback && (hasConfiguredKey(IMAGE_API_KEY) || geminiEnabled);
 
 // Optional: use Anthropic's Claude to DRAW each slide's SVG (Claude writes far more
 // accurate, well-labelled sketch diagrams than a text model). DeepSeek still writes
@@ -1149,6 +1150,8 @@ function makeFallbackSlide({ topic, concept, level, settings = {}, slideNumber, 
   const paragraphWords = { brief: '40-60', medium: '70-100', detailed: '110-150' }[settings.paragraphLength] || '70-100';
   const titleBase = String(concept || topic || 'Learning concept').trim();
   const title = titleBase.split(/\s+/).slice(0, 8).join(' ');
+  const exampleType = String(settings.exampleType || '').toLowerCase();
+  const proofMode = exampleType === 'proof';
   const adaptationLine = branch
     ? (branch.correct
       ? 'You answered correctly on the previous step, so this slide goes a level deeper.'
@@ -1162,7 +1165,15 @@ function makeFallbackSlide({ topic, concept, level, settings = {}, slideNumber, 
     { type: 'text', content: `Before the next slide, summarize the concept in one sentence, then test it on a small scenario. If your explanation predicts outcomes and trade-offs, your understanding is likely solid; if not, revisit the key mechanism and assumptions.` }
   ];
 
-  if (isTimeTravel) {
+  if (proofMode) {
+    components.push({
+      type: 'latex',
+      content: makeFallbackProofLatex({ topic, concept, slideNumber, branch }),
+      caption: `Proof step ${slideNumber}: ${title}`
+    });
+  }
+
+  if (isTimeTravel && !proofMode) {
     if (slideNumber % 2 === 0) {
       components.push({
         type: 'table',
@@ -1500,6 +1511,44 @@ function makeFallbackTable(slide, context = {}) {
     ],
     caption: `Slide ${context.slideNumber || 1} main idea vs perspective table`
   };
+}
+
+function makeFallbackProofLatex({ topic = '', concept = '', slideNumber = 1, branch = null } = {}) {
+  const text = `${topic} ${concept}`.toLowerCase();
+  const correction = branch?.correct
+    ? '\\text{Continue the derivation from the previous line.}'
+    : '\\text{Correct the missing step before continuing.}';
+
+  if (/taylor/.test(text)) {
+    if (slideNumber <= 1) {
+      return String.raw`\begin{aligned}
+f(x) &= P_n(x) + R_n(x) \\
+P_n(x) &= \sum_{k=0}^{n}\frac{f^{(k)}(a)}{k!}(x-a)^k \\
+${correction}
+\end{aligned}`;
+    }
+    return String.raw`\begin{aligned}
+R_n(x) &= f(x) - P_n(x) \\
+&= f(x) - \sum_{k=0}^{n}\frac{f^{(k)}(a)}{k!}(x-a)^k \\
+&= \frac{f^{(n+1)}(\xi)}{(n+1)!}(x-a)^{n+1}, \quad \xi \in (a,x) \\
+${correction}
+\end{aligned}`;
+  }
+
+  if (/bayes|diagnostic|test/.test(text)) {
+    return String.raw`\begin{aligned}
+P(H\mid E) &= \frac{P(E\mid H)P(H)}{P(E)} \\
+P(E) &= P(E\mid H)P(H) + P(E\mid \neg H)P(\neg H) \\
+${correction}
+\end{aligned}`;
+  }
+
+  return String.raw`\begin{aligned}
+	ext{Claim: } & ${String(concept || topic || 'the result')} \\
+	ext{Step 1: } & \text{state assumptions and definitions} \\
+	ext{Step 2: } & \text{derive the key relation} \\
+${correction}
+\end{aligned}`;
 }
 
 function enforceVisualCyclePolicy(slide, context = {}) {
@@ -2157,6 +2206,7 @@ app.post('/api/ai/slide', auth, async (req, res) => {
   }[settings.imageDensity] || 'Include one visual component alongside the paragraphs.';
   const allowModelSvg = !imageEnabled && !claudeSvgEnabled;
   const isTimeTravelActivity = settings.activityType === 'time-travel' || /time\s*travel|\bfuture\b|\bpast\b|\bpresent\b|headline|news/i.test(`${topic} ${concept} ${settings.customInstructions || ''}`);
+  const proofMode = String(settings.exampleType || '').toLowerCase() === 'proof';
   const canGenerateImage = true;
   const stemFocus = /math|physics|program|algorithm|computer|data|statistics|calculus|algebra|geometry|numerical|machine learning|ai|engineering|cryptography|proof|equation|formula|theorem|derivative|integral|linear algebra|probability/i
     .test(`${topic} ${concept}`);
@@ -2208,6 +2258,7 @@ Rules:
 - If a LaTeX formula/proof block is included: ${equationDepth} Follow it with explanatory text that walks through the symbols and logic step-by-step.
 - Any formula/proof/code explanation should be as substantial as the selected paragraph length setting; avoid tiny token examples for long-form settings.
 - ${stemFocus ? `${stemAlternation} For this STEM-heavy concept, include either a code snippet or a LaTeX formula/proof block, plus textual explanation tying them together.` : 'Use STEM-style formula/code components only when they naturally fit the concept.'}
+- ${proofMode ? 'PROOF MODE: every slide must contain at least one displayed LaTeX proof or derivation block. Do not summarize the proof in prose only. Continue the derivation from the previous slide, and if the learner was wrong, repair the missing step explicitly.' : ''}
 - ${isTimeTravelActivity
   ? 'This is a Time Travel activity slide: keep the explanation timeline-aware and use a table only if it genuinely clarifies the progression.'
   : "For non-time-travel activities, keep the explanation tied to the concept and the learner's previous answer."}
@@ -2259,8 +2310,15 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
     const slide = await generateStructured([{ role: 'system', content: system }, { role: 'user', content: user }], { temperature: 0.85, maxTokens: 8192 });
     slide.components = sanitizeComponents(slide.components);
     slide.components = (slide.components || []).filter(c => c?.type !== 'image' && c?.type !== 'svg');
-    if (settings.imageDensity === 'text-only') {
+    if (settings.imageDensity === 'text-only' && !proofMode) {
       slide.components = slide.components.filter(c => !['latex', 'code', 'table'].includes(c.type));
+    }
+    if (proofMode && !slide.components.some(c => c?.type === 'latex')) {
+      slide.components.unshift({
+        type: 'latex',
+        content: makeFallbackProofLatex({ topic, concept, slideNumber, branch }),
+        caption: `Proof step ${slideNumber}: ${String(concept || topic || 'Concept').trim().split(/\s+/).slice(0, 8).join(' ')}`
+      });
     }
     enforceSlideVisualPolicy(slide, history, slideNumber);
     if (!slide.quiz || !Array.isArray(slide.quiz.options) || !slide.quiz.options.some(o => o.correct)) {

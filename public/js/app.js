@@ -563,16 +563,18 @@ function bindSuggestedTopicHandlers() {
     state.suggestedSettings = {
       totalSlides,
       tone,
+      exampleType,
+      activityType: 'structured-explanation',
       complexity,
       paragraphLength,
       paragraphCount,
       imageDensity,
       language: '',
       audience: '',
-      customInstructions: `Teach "${prompt}" as ${modeMap[exampleType] || modeMap.proof}. ${alternationLine} Include LaTeX formulas where relevant and accompany every equation/code/table/graph/diagram with written explanation aligned to ${level} difficulty and ${tone} tone. ${continuationMap[continuation] || continuationMap['related-topics']}`
+      customInstructions: `Teach "${prompt}" as ${modeMap[exampleType] || modeMap.proof}. ${alternationLine} If this is a proof, every slide must show the actual derivation in LaTeX and continue from the previous slide rather than restarting. Accompany every equation/code/table/graph/diagram with written explanation aligned to ${level} difficulty and ${tone} tone. ${continuationMap[continuation] || continuationMap['related-topics']}`
     };
 
-    state.suggestedGuidance = `Build a rigorous but clear learning path for "${prompt}" focused on ${modeMap[exampleType] || modeMap.proof}. Use visual representations (trees, diagrams, tables, graphs, or sketches) when helpful, and always include explanatory text.`;
+    state.suggestedGuidance = `Build a rigorous but clear learning path for "${prompt}" focused on ${modeMap[exampleType] || modeMap.proof}. If the example type is proof, every slide must include a displayed LaTeX proof block that continues the derivation from the previous answer. Use visual representations (trees, diagrams, tables, graphs, or sketches) when helpful, and always include explanatory text.`;
     triggerHomePreloads(prompt);
     loadPath(prompt, state.suggestedGuidance, [level], { fromHistory: true, fresh: true });
   });
@@ -1048,7 +1050,8 @@ function viewSettings() {
     state.settings = {
       totalSlides,
       tone,
-      activityType: state.suggestedSettings?.activityType || '',
+      activityType: state.suggestedSettings?.activityType || (state.latexLab?.exampleType ? 'structured-explanation' : ''),
+      exampleType: state.suggestedSettings?.exampleType || state.latexLab?.exampleType || '',
       complexity: document.getElementById('set-complexity').value,
       paragraphLength: document.getElementById('set-paragraph').value,
       paragraphCount: parseInt(document.getElementById('set-paragraph-count').value, 10) || 3,
