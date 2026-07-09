@@ -1380,17 +1380,17 @@ function enforceSlideVisualPolicy(slide, history = [], slideNumber = 1) {
 
   // Ensure uniqueness when a repeated visual slips through by adjusting the component content.
   if (oneVisual.type === 'table' && Array.isArray(oneVisual.rows)) {
-    const width = Math.max(2, (oneVisual.headers || []).length || 4);
+    const width = 2;
     const forcedRow = [
       `Slide ${slideNumber}: ${titleSeed}`,
-      quizSeed || 'Key signal',
-      'Distinct trade-off',
-      'Best decision for this quiz'
+      quizSeed || 'Different perspective'
     ].slice(0, width);
     if (!Array.isArray(oneVisual.rows)) oneVisual.rows = [];
     oneVisual.rows = [forcedRow, ...oneVisual.rows].slice(0, 8);
     if (!Array.isArray(oneVisual.headers) || !oneVisual.headers.length) {
-      oneVisual.headers = ['Scenario', 'Signal', 'Trade-off', 'Decision'].slice(0, width);
+      oneVisual.headers = ['Main idea', 'Different perspective'].slice(0, width);
+    } else {
+      oneVisual.headers = oneVisual.headers.slice(0, width);
     }
     oneVisual.caption = `Slide ${slideNumber}: ${String(oneVisual.caption || 'comparison table').trim()}`;
     return;
@@ -1489,16 +1489,16 @@ function buildGenericImagePrompt(slide, context = {}) {
 function makeFallbackTable(slide, context = {}) {
   const title = String(slide?.title || context.concept || 'Concept').trim();
   const quiz = String(slide?.quiz?.question || 'How do we evaluate this concept?').trim();
-  const topic = String(context.topic || slide?.summary || 'Topic').trim();
+  const perspective = String(slide?.summary || context.topic || 'Different perspective').trim();
   return {
     type: 'table',
-    headers: ['Category', 'What it shows', 'Why it matters'],
+    headers: ['Main idea', 'Different perspective'],
     rows: [
-      [topic.slice(0, 28), title.slice(0, 30), `Slide ${context.slideNumber || 1} focus`],
-      ['Key question', quiz.slice(0, 30), 'Use the slide evidence to answer it'],
-      ['Practical takeaway', String(slide?.summary || '').slice(0, 30), 'This is what the learner should remember']
+      [title.slice(0, 34), perspective.slice(0, 34)],
+      ['Key question', quiz.slice(0, 34)],
+      [String(context.topic || 'Topic').slice(0, 34), `Slide ${context.slideNumber || 1} correction`]
     ],
-    caption: `Slide ${context.slideNumber || 1} comparison table`
+    caption: `Slide ${context.slideNumber || 1} main idea vs perspective table`
   };
 }
 
@@ -2203,6 +2203,7 @@ Rules:
 - COHESION: the paragraphs must build on one another in order — introduce the idea, develop it, then apply or consolidate it — never restating the same point. The slide must also connect to the previous slides (briefly recall or build on them) and set up what comes next, so the whole presentation reads as one continuous, complementary lesson rather than isolated cards.
 - TABLES: when using a table, keep it compact (3-6 rows, 2-6 columns), label headers clearly, and ensure every row directly supports the slide's teaching point.
 - QUIZ ALIGNMENT: if a table is included, it must directly help answer this slide's multiple-choice question or explain one likely misconception.
+- TABLE FORMAT: when a table appears, use exactly two columns labeled "Main idea" and "Different perspective"; each row should contrast the core point with a useful alternate angle or correction.
 - If a code snippet is included: ${codeDepth} Include clear inline comments that explain non-obvious lines and decisions.
 - If a LaTeX formula/proof block is included: ${equationDepth} Follow it with explanatory text that walks through the symbols and logic step-by-step.
 - Any formula/proof/code explanation should be as substantial as the selected paragraph length setting; avoid tiny token examples for long-form settings.
