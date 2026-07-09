@@ -655,8 +655,65 @@ function makeUser(username, password, role) {
   return { username, salt, passwordHash: hashPassword(password, salt), role, createdAt: new Date().toISOString() };
 }
 
-// ---------- sessions (auth tokens, in memory) ----------
-const tokens = new Map(); // token -> username
+// ---------- sessions (signed stateless auth tokens) ----------
+const AUTH_TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET || DATABASE_URL || 'local-dev-session-secret';
+const AUTH_TOKEN_TTL_SEC = Math.max(300, parseInt(process.env.AUTH_TOKEN_TTL_SEC, 10) || (60 * 60 * 24 * 30));
+
+function b64urlEncode(input) {
+  return Buffer.from(input)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function b64urlDecode(input) {
+  const base64 = String(input || '').replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64 + '==='.slice((base64.length + 3) % 4);
+  return Buffer.from(padded, 'base64').toString('utf8');
+}
+
+function signAuthToken(payload) {
+  const body = b64urlEncode(JSON.stringify(payload));
+  const sig = crypto
+    .createHmac('sha256', AUTH_TOKEN_SECRET)
+    .update(body)
+    .digest('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+  return `${body}.${sig}`;
+}
+
+function verifyAuthToken(token) {
+  const raw = String(token || '').trim();
+  const parts = raw.split('.');
+  if (parts.length !== 2) return null;
+  const [body, sig] = parts;
+
+  const expected = crypto
+    .createHmac('sha256', AUTH_TOKEN_SECRET)
+    .update(body)
+    .digest('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+
+  try {
+    const payload = JSON.parse(b64urlDecode(body));
+    const now = Math.floor(Date.now() / 1000);
+    if (!payload || typeof payload !== 'object') return null;
+    if (!payload.u || typeof payload.u !== 'string') return null;
+    if (!Number.isFinite(payload.exp) || payload.exp <= now) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -693,8 +750,9 @@ const claudeSvgEnabled = !!ANTHROPIC_API_KEY;
 async function auth(req, res, next) {
   try {
     const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-    const username = tokens.get(token);
-    if (!username) return res.status(401).json({ error: 'Not signed in' });
+    const payload = verifyAuthToken(token);
+    if (!payload) return res.status(401).json({ error: 'Not signed in' });
+    const username = payload.u;
     req.user = users.find(u => u.username === username) || null;
     if (!req.user && pgPool) {
       users = await loadUsers();
@@ -719,14 +777,13 @@ app.post('/api/login', async (req, res) => {
   if (!user || hashPassword(password || '', user.salt) !== user.passwordHash) {
     return res.status(401).json({ error: 'Wrong username or password' });
   }
-  const token = crypto.randomBytes(24).toString('hex');
-  tokens.set(token, user.username);
+  const now = Math.floor(Date.now() / 1000);
+  const token = signAuthToken({ u: user.username, iat: now, exp: now + AUTH_TOKEN_TTL_SEC, v: 1 });
   res.json({ token, username: user.username, role: user.role });
 });
 
 app.post('/api/logout', auth, (req, res) => {
-  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-  tokens.delete(token);
+  // Stateless tokens cannot be revoked server-side without a deny-list store.
   res.json({ ok: true });
 });
 

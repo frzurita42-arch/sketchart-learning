@@ -25,7 +25,11 @@ const API = {
     });
     let data = null;
     try { data = await res.json(); } catch { /* non-JSON error body */ }
-    if (res.status === 401 && this.token) { this.clearSession(); location.reload(); return; }
+    if (res.status === 401 && this.token) {
+      this.clearSession();
+      location.reload();
+      throw new Error('Session expired. Please sign in again.');
+    }
     if (!res.ok) throw new Error((data && data.error) || `Request failed (${res.status})`);
     return data;
   },
