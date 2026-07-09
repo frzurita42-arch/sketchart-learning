@@ -10,6 +10,9 @@ const state = {
   topic: null,
   path: null,
   homeTopics: [],
+  homeSuggestion: null,
+  suggestedSettings: null,
+  suggestedGuidance: '',
   concept: null,
   level: null,
   settings: null,
@@ -107,7 +110,8 @@ function viewHome() {
       <label class="field"><span>…or a custom topic</span>
         <input type="text" id="custom-topic" placeholder="e.g. Renaissance art, Rust programming, beekeeping…" /></label>
       <button class="btn primary" id="custom-topic-btn">Draw my path →</button>
-    </div>`;
+    </div>
+    ${renderSuggestedTopicSection()}`;
 
   document.getElementById('refresh-home-topics').addEventListener('click', async (e) => {
     const btn = e.currentTarget;
@@ -117,11 +121,14 @@ function viewHome() {
     try {
       const r = await withTimeout(API.post('/api/ai/topics', {
         count: 12,
-        avoid: state.homeTopics
+        avoid: state.homeTopics,
+        refresh: true,
+        triggerTopic: state.topic || ''
       }), 25000, 'Topic refresh timed out. Please retry.');
       if (!r || !Array.isArray(r.topics)) return;
       const fromAI = r.topics.map(t => t.name).filter(Boolean);
       if (fromAI.length) state.homeTopics = shuffled(fromAI).slice(0, 12);
+      triggerHomePreloads(state.homeTopics[0] || '');
       viewHomeWithCurrentTopics();
     } catch (err) {
       btn.disabled = false;
@@ -131,6 +138,9 @@ function viewHome() {
   });
 
   bindHomeTopicHandlers();
+  bindSuggestedTopicHandlers();
+  refreshHomeTopics({ silent: true, forceRefresh: false });
+  refreshSuggestedTopic({ silent: true, forceRefresh: false });
 }
 
 function viewHomeWithCurrentTopics() {
@@ -140,12 +150,13 @@ function viewHomeWithCurrentTopics() {
     <div class="slide-actions" style="justify-content:center;margin-bottom:10px">
       <button class="btn small blue" id="refresh-home-topics">↻ Refresh 12 topic ideas</button>
     </div>
-    <div class="chip-row">${shuffled(state.homeTopics).map(t => `<button class="chip" data-topic="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+    <div class="chip-row">${state.homeTopics.map(t => `<button class="chip" data-topic="${esc(t)}">${esc(t)}</button>`).join('')}</div>
     <div class="card alt" style="max-width:560px;margin:26px auto 0">
       <label class="field"><span>…or a custom topic</span>
         <input type="text" id="custom-topic" placeholder="e.g. Renaissance art, Rust programming, beekeeping…" /></label>
       <button class="btn primary" id="custom-topic-btn">Draw my path →</button>
-    </div>`;
+    </div>
+    ${renderSuggestedTopicSection()}`;
 
   document.getElementById('refresh-home-topics').addEventListener('click', async (e) => {
     const btn = e.currentTarget;
@@ -155,11 +166,14 @@ function viewHomeWithCurrentTopics() {
     try {
       const r = await withTimeout(API.post('/api/ai/topics', {
         count: 12,
-        avoid: state.homeTopics
+        avoid: state.homeTopics,
+        refresh: true,
+        triggerTopic: state.topic || ''
       }), 25000, 'Topic refresh timed out. Please retry.');
       if (!r || !Array.isArray(r.topics)) return;
       const fromAI = r.topics.map(t => t.name).filter(Boolean);
       if (fromAI.length) state.homeTopics = shuffled(fromAI).slice(0, 12);
+      triggerHomePreloads(state.homeTopics[0] || '');
       viewHomeWithCurrentTopics();
     } catch (err) {
       btn.disabled = false;
@@ -169,16 +183,154 @@ function viewHomeWithCurrentTopics() {
   });
 
   bindHomeTopicHandlers();
+  bindSuggestedTopicHandlers();
 }
 
 function bindHomeTopicHandlers() {
-  $app.querySelectorAll('[data-topic]').forEach(b => b.addEventListener('click', () => loadPath(b.dataset.topic)));
+  $app.querySelectorAll('[data-topic]').forEach(b => b.addEventListener('click', () => {
+    triggerHomePreloads(b.dataset.topic || '');
+    state.suggestedSettings = null;
+    state.suggestedGuidance = '';
+    loadPath(b.dataset.topic);
+  }));
   const custom = () => {
     const t = document.getElementById('custom-topic').value.trim();
-    if (t) loadPath(t);
+    if (t) {
+      triggerHomePreloads(t);
+      state.suggestedSettings = null;
+      state.suggestedGuidance = '';
+      loadPath(t);
+    }
   };
   document.getElementById('custom-topic-btn').addEventListener('click', custom);
   document.getElementById('custom-topic').addEventListener('keydown', e => { if (e.key === 'Enter') custom(); });
+}
+
+function triggerHomePreloads(triggerTopic = '') {
+  API.post('/api/ai/topics/preload', {
+    triggerTopic,
+    avoid: [state.topic, ...(state.homeTopics || [])].filter(Boolean)
+  }).catch(() => {});
+
+  API.post('/api/ai/suggested-topic/preload', {
+    triggerTopic,
+    avoidTopics: [state.topic, ...(state.homeTopics || []), state.homeSuggestion?.topic].filter(Boolean)
+  }).catch(() => {});
+}
+
+async function refreshHomeTopics({ silent = false, forceRefresh = false } = {}) {
+  try {
+    const r = await withTimeout(API.post('/api/ai/topics', {
+      count: 12,
+      avoid: [state.topic].filter(Boolean),
+      refresh: !!forceRefresh,
+      triggerTopic: state.topic || ''
+    }), 15000, 'Home topics timed out.');
+    if (!r || !Array.isArray(r.topics)) return;
+    const fromCache = r.topics.map(t => t.name).filter(Boolean);
+    if (fromCache.length) {
+      state.homeTopics = fromCache.slice(0, 12);
+      viewHomeWithCurrentTopics();
+    }
+  } catch (err) {
+    if (!silent) alert(`Could not load home topics: ${err.message}`);
+  }
+}
+
+function renderSuggestedTopicSection() {
+  const s = state.homeSuggestion;
+  const settings = s?.settings || {};
+  const hasSuggestion = !!(s && s.topic && !s.error);
+  const setupReceipt = [
+    `Level: ${settings.level || 'Upper Intermediate'}`,
+    `Slides: ${String(settings.totalSlides || 7)}`,
+    `Paragraph: ${settings.paragraphLength || 'medium'}`,
+    `Para/slide: ${String(settings.paragraphCount || 3)}`,
+    `Tone: ${settings.tone || 'Friendly lecture'}`,
+    `Complexity: ${settings.complexity || 'standard'}`,
+    `Visual: ${settings.imageDensity || 'balanced'}`
+  ].join(' | ');
+  return `
+    <div style="max-width:760px;margin:36px auto 0">
+      <h4 style="margin:0 0 2px;opacity:.9">Suggested topic</h4>
+      ${hasSuggestion ? `<p style="margin:0 0 8px;font-weight:700">${esc(s.topic)}</p>` : ''}
+      <div class="card" style="max-width:760px;margin:0 auto 0;padding:14px 16px">
+      <div class="slide-actions" style="justify-content:flex-start;margin-bottom:10px">
+        <button class="btn small blue" id="refresh-suggested-topic">↻ Refresh suggestion</button>
+      </div>
+      ${hasSuggestion ? `
+        <div class="summary-card" style="padding:10px 12px;border-radius:14px">
+          <p style="margin:0;font-size:.95rem">${esc(s.why || '')}</p>
+          ${Array.isArray(s.honorableMentions) && s.honorableMentions.length ? `<p style="margin:6px 0 0;font-size:.9rem"><b>Mentions:</b> ${s.honorableMentions.map(v => esc(v)).join(' · ')}</p>` : ''}
+          <p style="margin:8px 0 0;padding:8px 10px;border:1px dashed #2d2a26;border-radius:10px;background:#fff8da;font-size:.88rem"><b>Recommended setup:</b> ${esc(setupReceipt)}</p>
+          ${s.customMessage ? `<p style="margin:6px 0 0;font-size:.88rem"><b>Prompt:</b> ${esc(s.customMessage)}</p>` : ''}
+        </div>
+        <div class="slide-actions" style="justify-content:flex-start;margin-top:10px">
+          <button class="btn green" id="use-suggested-topic">Use this suggestion →</button>
+        </div>
+      ` : s?.error
+          ? `<p style="opacity:.85">${esc(s.why || 'Could not load suggestion right now. Press refresh to retry.')}</p>`
+          : '<p style="opacity:.75">Generating your suggestion…</p>'}
+      </div>
+    </div>`;
+}
+
+function bindSuggestedTopicHandlers() {
+  const refreshBtn = document.getElementById('refresh-suggested-topic');
+  if (refreshBtn) refreshBtn.addEventListener('click', () => refreshSuggestedTopic({ silent: false, forceRefresh: true }));
+
+  const useBtn = document.getElementById('use-suggested-topic');
+  if (useBtn) useBtn.addEventListener('click', () => {
+    const s = state.homeSuggestion;
+    if (!s || !s.topic) return;
+    state.suggestedSettings = {
+      totalSlides: parseInt(s.settings?.totalSlides, 10) || 7,
+      tone: s.settings?.tone || 'Friendly lecture',
+      complexity: s.settings?.complexity || 'standard',
+      paragraphLength: s.settings?.paragraphLength || 'medium',
+      paragraphCount: parseInt(s.settings?.paragraphCount, 10) || 3,
+      imageDensity: s.settings?.imageDensity || 'balanced',
+      language: '',
+      audience: '',
+      customInstructions: String(s.customMessage || '').trim()
+    };
+    state.suggestedGuidance = String(s.customMessage || '').trim();
+    loadPath(s.topic, state.suggestedGuidance || undefined, s.settings?.level ? [s.settings.level] : undefined, { fromHistory: true, fresh: true });
+  });
+}
+
+async function refreshSuggestedTopic({ silent = false, forceRefresh = false } = {}) {
+  const btn = document.getElementById('refresh-suggested-topic');
+  if (btn) {
+    btn.disabled = true;
+    btn.dataset.oldLabel = btn.textContent;
+    btn.textContent = 'Refreshing suggestion…';
+  }
+  try {
+    const r = await withTimeout(API.post('/api/ai/suggested-topic', {
+      avoidTopics: [state.topic].filter(Boolean),
+      refresh: !!forceRefresh,
+      triggerTopic: state.topic || ''
+    }), 25000, 'Suggested topic timed out. Please retry.');
+    state.homeSuggestion = (r && r.topic)
+      ? r
+      : {
+          error: true,
+          why: 'Suggestion service returned an incomplete result. Press refresh to retry.'
+        };
+    viewHomeWithCurrentTopics();
+  } catch (err) {
+    state.homeSuggestion = {
+      error: true,
+      why: 'Could not load suggestion right now. Press refresh suggestion to retry.'
+    };
+    viewHomeWithCurrentTopics();
+    if (!silent) alert(`Could not get suggestion: ${err.message}`);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = btn.dataset.oldLabel || '↻ Refresh suggestion';
+    }
+  }
 }
 
 /* ---------------- learning path ---------------- */
@@ -304,9 +456,11 @@ function viewPath() {
 /* ---------------- activity settings ---------------- */
 function viewSettings() {
   if (!state.concept) return viewHome();
+  const preset = state.suggestedSettings || null;
   $app.innerHTML = `
     <h1 class="view-title">Set up your <span class="scribble-underline">reading activity</span></h1>
     <p class="view-sub">${esc(state.concept)} · ${esc(state.level)} · ${esc(state.topic)}</p>
+    ${state.suggestedGuidance ? `<div class="card alt" style="margin-bottom:12px"><b>Suggested prompt</b><p style="margin-top:6px">${esc(state.suggestedGuidance)}</p><p class="muted-line">You can still customize every setting below.</p></div>` : ''}
     <div class="settings-grid">
       <div class="card">
         <h3>📏 Length</h3>
@@ -371,6 +525,38 @@ function viewSettings() {
     document.getElementById('custom-length-wrap').classList.toggle('hidden', e.target.value !== 'custom'));
   document.getElementById('set-tone').addEventListener('change', e =>
     document.getElementById('custom-tone-wrap').classList.toggle('hidden', e.target.value !== 'custom'));
+
+  if (preset) {
+    const len = Math.min(20, Math.max(2, parseInt(preset.totalSlides, 10) || 7));
+    const lenSelect = document.getElementById('set-length');
+    if ([4, 7, 10].includes(len)) {
+      lenSelect.value = String(len);
+      document.getElementById('custom-length-wrap').classList.add('hidden');
+    } else {
+      lenSelect.value = 'custom';
+      document.getElementById('custom-length-wrap').classList.remove('hidden');
+      document.getElementById('set-length-custom').value = String(len);
+    }
+
+    if (preset.paragraphLength) document.getElementById('set-paragraph').value = preset.paragraphLength;
+    const paraCount = Math.min(7, Math.max(1, parseInt(preset.paragraphCount, 10) || 3));
+    document.getElementById('set-paragraph-count').value = String(paraCount);
+    document.getElementById('para-count-val').textContent = String(paraCount);
+    if (preset.complexity) document.getElementById('set-complexity').value = preset.complexity;
+    if (preset.imageDensity) document.getElementById('set-density').value = preset.imageDensity;
+    if (preset.language) document.getElementById('set-language').value = preset.language;
+    if (preset.audience) document.getElementById('set-audience').value = preset.audience;
+    if (preset.customInstructions) document.getElementById('set-instructions').value = preset.customInstructions;
+
+    if (preset.tone && TONES.includes(preset.tone)) {
+      document.getElementById('set-tone').value = preset.tone;
+      document.getElementById('custom-tone-wrap').classList.add('hidden');
+    } else if (preset.tone) {
+      document.getElementById('set-tone').value = 'custom';
+      document.getElementById('custom-tone-wrap').classList.remove('hidden');
+      document.getElementById('set-tone-custom').value = preset.tone;
+    }
+  }
 
   document.getElementById('start-btn').addEventListener('click', () => {
     const lenSel = document.getElementById('set-length').value;

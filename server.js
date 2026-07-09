@@ -18,6 +18,62 @@ const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 const DEEPSEEK_URL = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions';
 const DATA_DIR = path.join(__dirname, 'data');
 const GEN_DIR = path.join(DATA_DIR, 'generated');
+const SUGGESTED_STORE_FILE = 'suggested_topics.json';
+const HOME_TOPICS_STORE_FILE = 'home_topics.json';
+
+const GLOBAL_TREND_SEEDS = [
+  'AI safety and alignment',
+  'Climate adaptation systems',
+  'Public health data literacy',
+  'Space economy basics',
+  'Cybersecurity for citizens',
+  'Water resilience engineering',
+  'Energy storage breakthroughs',
+  'Misinformation detection methods',
+  'Food security analytics',
+  'Disaster response logistics'
+];
+
+const DEFAULT_SUGGESTION_PAIR = [
+  {
+    topic: 'Climate adaptation systems',
+    why: 'This connects real global pressure points to practical problem-solving skills that stay relevant over time.',
+    honorableMentions: ['Water resilience engineering', 'Disaster response logistics', 'Energy storage breakthroughs'],
+    settings: {
+      level: 'Upper Intermediate',
+      totalSlides: 7,
+      paragraphLength: 'medium',
+      paragraphCount: 3,
+      tone: 'friendly lecture',
+      complexity: 'standard',
+      imageDensity: 'balanced'
+    },
+    customMessage: 'Frame each slide around a real-world constraint and end with one actionable solution step.'
+  },
+  {
+    topic: 'Misinformation detection methods',
+    why: 'This sharpens critical thinking for current-event information overload and teaches decision-quality habits.',
+    honorableMentions: ['Public health data literacy', 'AI safety and alignment', 'Cybersecurity for citizens'],
+    settings: {
+      level: 'Lower Intermediate',
+      totalSlides: 6,
+      paragraphLength: 'brief',
+      paragraphCount: 3,
+      tone: 'Socratic questioning',
+      complexity: 'standard',
+      imageDensity: 'mostly-text'
+    },
+    customMessage: 'Use one current headline-style claim per slide and test it with a simple verification checklist.'
+  }
+];
+
+const DEFAULT_HOME_TOPIC_POOL = [
+  'Math', 'Physics', 'Chemistry', 'Biology', 'History', 'Geography', 'Literature', 'Programming',
+  'Economics', 'Music Theory', 'Astronomy', 'Psychology', 'Climate adaptation systems',
+  'Public health data literacy', 'Cybersecurity for citizens', 'Energy storage breakthroughs',
+  'Water resilience engineering', 'Food security analytics', 'Disaster response logistics',
+  'Misinformation detection methods', 'Data storytelling', 'Systems thinking', 'AI safety and alignment', 'Space economy basics'
+];
 
 function hasConfiguredKey(value) {
   const v = String(value || '').trim();
@@ -96,6 +152,160 @@ function recentUserGames(username, limit = 20) {
 function buildBaseUrl(req) {
   const host = req.get('host');
   return `${req.protocol}://${host}`;
+}
+
+function pickRandom(items) {
+  if (!Array.isArray(items) || !items.length) return null;
+  return items[Math.floor(Math.random() * items.length)] || null;
+}
+
+function isValidSuggestion(item) {
+  return !!(item && typeof item === 'object' && String(item.topic || '').trim());
+}
+
+function readSuggestedStore() {
+  const fallback = { defaults: DEFAULT_SUGGESTION_PAIR, users: {} };
+  const store = readJSON(SUGGESTED_STORE_FILE, fallback);
+  if (!store || typeof store !== 'object') return fallback;
+  if (!Array.isArray(store.defaults) || !store.defaults.length) store.defaults = DEFAULT_SUGGESTION_PAIR;
+  if (!store.users || typeof store.users !== 'object') store.users = {};
+  return store;
+}
+
+function writeSuggestedStore(store) {
+  writeJSON(SUGGESTED_STORE_FILE, store);
+}
+
+function readHomeTopicsStore() {
+  const fallback = { defaults: DEFAULT_HOME_TOPIC_POOL, users: {} };
+  const store = readJSON(HOME_TOPICS_STORE_FILE, fallback);
+  if (!store || typeof store !== 'object') return fallback;
+  if (!Array.isArray(store.defaults) || !store.defaults.length) store.defaults = DEFAULT_HOME_TOPIC_POOL;
+  if (!store.users || typeof store.users !== 'object') store.users = {};
+  return store;
+}
+
+function writeHomeTopicsStore(store) {
+  writeJSON(HOME_TOPICS_STORE_FILE, store);
+}
+
+function normalizeTopicPool(list, fallbackPool) {
+  const raw = Array.isArray(list) ? list : [];
+  const cleaned = raw
+    .map(v => String(v || '').trim())
+    .filter(Boolean)
+    .filter((v, i, arr) => arr.findIndex(x => x.toLowerCase() === v.toLowerCase()) === i);
+  return cleaned.length ? cleaned : fallbackPool.slice();
+}
+
+function rotatePickFromList(list, count, avoidSet = new Set(), startCursor = 0) {
+  const pool = Array.isArray(list) ? list : [];
+  if (!pool.length) return { items: [], nextCursor: 0 };
+  const filtered = pool.filter(v => !avoidSet.has(String(v || '').toLowerCase()));
+  const source = filtered.length >= Math.min(count, pool.length) ? filtered : pool;
+  if (!source.length) return { items: [], nextCursor: 0 };
+
+  const want = Math.min(source.length, Math.max(1, count));
+  const out = [];
+  const cursorBase = ((startCursor % source.length) + source.length) % source.length;
+  for (let i = 0; i < want; i++) out.push(source[(cursorBase + i) % source.length]);
+  const step = Math.max(1, Math.floor(want / 2));
+  const nextCursor = (cursorBase + step) % source.length;
+  return { items: out, nextCursor };
+}
+
+function rotatePickSuggestionFromPair(pair, avoidSet = new Set(), startCursor = 0) {
+  const valid = (Array.isArray(pair) ? pair : []).filter(isValidSuggestion);
+  if (!valid.length) return { item: null, nextCursor: 0 };
+  const preferred = valid.filter(v => !avoidSet.has(String(v.topic || '').toLowerCase()));
+  const source = preferred.length ? preferred : valid;
+  const cursorBase = ((startCursor % source.length) + source.length) % source.length;
+  return { item: source[cursorBase], nextCursor: (cursorBase + 1) % source.length };
+}
+
+function randomPickSuggestionNoRepeat(pair, avoidSet = new Set(), lastShownTopic = '') {
+  const valid = (Array.isArray(pair) ? pair : []).filter(isValidSuggestion);
+  if (!valid.length) return null;
+  const preferred = valid.filter(v => !avoidSet.has(String(v.topic || '').toLowerCase()));
+  const source = preferred.length ? preferred : valid;
+  if (!source.length) return null;
+
+  const last = String(lastShownTopic || '').trim().toLowerCase();
+  let candidates = source;
+  if (last && source.length > 1) {
+    const withoutLast = source.filter(v => String(v.topic || '').trim().toLowerCase() !== last);
+    if (withoutLast.length) candidates = withoutLast;
+  }
+  return candidates[Math.floor(Math.random() * candidates.length)] || source[0];
+}
+
+function makeFallbackPair(avoidSet = new Set(), anchorTopic = '') {
+  const picked = [];
+  const seedPool = [...GLOBAL_TREND_SEEDS];
+  const maybeAnchor = String(anchorTopic || '').trim();
+  if (maybeAnchor && !avoidSet.has(maybeAnchor.toLowerCase())) picked.push(maybeAnchor);
+  for (const s of seedPool) {
+    if (picked.length >= 2) break;
+    if (avoidSet.has(s.toLowerCase())) continue;
+    if (picked.some(v => v.toLowerCase() === s.toLowerCase())) continue;
+    picked.push(s);
+  }
+  while (picked.length < 2) picked.push(GLOBAL_TREND_SEEDS[picked.length] || DEFAULT_SUGGESTION_PAIR[0].topic);
+
+  return picked.slice(0, 2).map((topic, idx) => ({
+    topic,
+    why: 'This aligns your recent interests with current global challenges and focuses on practical problem-solving skills.',
+    honorableMentions: GLOBAL_TREND_SEEDS.filter(v => v.toLowerCase() !== topic.toLowerCase()).slice(0, 3),
+    settings: idx === 0 ? {
+      level: 'Upper Intermediate',
+      totalSlides: 7,
+      paragraphLength: 'medium',
+      paragraphCount: 3,
+      tone: 'friendly lecture',
+      complexity: 'standard',
+      imageDensity: 'balanced'
+    } : {
+      level: 'Lower Intermediate',
+      totalSlides: 6,
+      paragraphLength: 'brief',
+      paragraphCount: 3,
+      tone: 'Socratic questioning',
+      complexity: 'standard',
+      imageDensity: 'mostly-text'
+    },
+    customMessage: 'Tie each explanation to one current event signal and one concrete action a learner could take.'
+  }));
+}
+
+function normalizeSuggestion(raw, fallback, avoidSet) {
+  const topic = String(raw?.topic || '').trim();
+  const normalizedTopic = topic && !avoidSet.has(topic.toLowerCase()) ? topic : fallback.topic;
+  const honorable = Array.isArray(raw?.honorableMentions)
+    ? raw.honorableMentions.map(v => String(v || '').trim()).filter(Boolean)
+    : [];
+  return {
+    topic: normalizedTopic,
+    why: String(raw?.why || '').trim() || fallback.why,
+    honorableMentions: (honorable.length ? honorable : fallback.honorableMentions)
+      .filter((v, i, arr) => arr.findIndex(x => x.toLowerCase() === v.toLowerCase()) === i)
+      .slice(0, 3),
+    settings: {
+      level: String(raw?.settings?.level || fallback.settings.level).trim() || fallback.settings.level,
+      totalSlides: Math.min(20, Math.max(2, parseInt(raw?.settings?.totalSlides, 10) || fallback.settings.totalSlides)),
+      paragraphLength: ['brief', 'medium', 'detailed'].includes(raw?.settings?.paragraphLength) ? raw.settings.paragraphLength : fallback.settings.paragraphLength,
+      paragraphCount: Math.min(7, Math.max(1, parseInt(raw?.settings?.paragraphCount, 10) || fallback.settings.paragraphCount)),
+      tone: String(raw?.settings?.tone || fallback.settings.tone).trim() || fallback.settings.tone,
+      complexity: ['simple', 'standard', 'scholarly'].includes(raw?.settings?.complexity) ? raw.settings.complexity : fallback.settings.complexity,
+      imageDensity: ['text-only', 'mostly-text', 'balanced', 'mostly-visual'].includes(raw?.settings?.imageDensity) ? raw.settings.imageDensity : fallback.settings.imageDensity
+    },
+    customMessage: String(raw?.customMessage || '').trim() || fallback.customMessage
+  };
+}
+
+function pickSuggestionFromPair(pair, avoidSet) {
+  const valid = (Array.isArray(pair) ? pair : []).filter(isValidSuggestion);
+  const preferred = valid.filter(v => !avoidSet.has(String(v.topic || '').toLowerCase()));
+  return pickRandom(preferred.length ? preferred : valid);
 }
 
 // ---------- users ----------
@@ -692,45 +902,228 @@ Include ONLY these levels, in this order: ${wanted.join(', ')}. Give 4-6 concret
   }
 });
 
-// ---------- AI: topic suggestions for the home chips ----------
-app.post('/api/ai/topics', auth, async (req, res) => {
-  const { count = 12, avoid = [] } = req.body || {};
-  const wanted = Math.min(20, Math.max(6, parseInt(count, 10) || 12));
-  const games = recentUserGames(req.user.username, 25);
-  const learned = [...new Set(games.map(g => `${g.topic} / ${g.concept}`).filter(Boolean))].slice(-18);
-  const avoidList = Array.isArray(avoid) ? avoid.map(String).filter(Boolean).slice(0, 30) : [];
+async function generateHomeTopicPoolForUser(username, { avoid = [], triggerTopic = '', poolSize = 24 } = {}) {
+  const games = recentUserGames(username, 30);
+  const learned = [...new Set(games.map(g => `${g.topic} / ${g.concept}`).filter(Boolean))].slice(-20);
+  const avoidList = Array.isArray(avoid) ? avoid.map(String).filter(Boolean).slice(0, 50) : [];
+  const wantedPool = Math.min(36, Math.max(18, parseInt(poolSize, 10) || 24));
 
-  try {
-    const result = await generateStructured([
-      {
-        role: 'system',
-        content: `Return JSON only:
+  const result = await generateStructured([
+    {
+      role: 'system',
+      content: `Return JSON only:
 {"topics":[{"name":string,"why":string}]}
 Rules:
-- Exactly ${wanted} topics.
-- Mix: about half deepen what this learner already studies; about half tie to current global issues/trends across fields.
-- Topic names: short, concrete (2-5 words), classroom-safe.
-- No duplicates.`
-      },
-      {
-        role: 'user',
-        content: `Learner recent studies:\n${learned.join('\n') || 'none yet'}\n\nAvoid these topic names:\n${avoidList.join('\n') || 'none'}`
-      }
-    ], { temperature: 0.7, maxTokens: 1800 });
+- Exactly ${wantedPool} topics.
+- Blend learner interests with current global trends.
+- Favor practical, problem-solving learning themes.
+- Topic names must be short, classroom-safe, and distinct.`
+    },
+    {
+      role: 'user',
+      content: `Trigger topic from home interaction (if any): ${triggerTopic || 'none'}\n\nLearner recent studies:\n${learned.join('\n') || 'none yet'}\n\nCurrent trend seeds:\n${GLOBAL_TREND_SEEDS.join('\n')}\n\nAvoid these topic names:\n${avoidList.join('\n') || 'none'}`
+    }
+  ], { temperature: 0.74, maxTokens: 2200 });
 
-    const topics = (result.topics || [])
-      .map(t => ({
-        name: String(t.name || '').trim(),
-        why: String(t.why || '').trim()
-      }))
-      .filter(t => t.name)
-      .filter((t, i, arr) => arr.findIndex(x => x.name.toLowerCase() === t.name.toLowerCase()) === i)
-      .slice(0, wanted);
+  return normalizeTopicPool((result.topics || []).map(t => t.name), DEFAULT_HOME_TOPIC_POOL);
+}
 
-    res.json({ topics });
-  } catch (e) {
-    res.status(502).json({ error: e.message });
+async function refreshHomeTopicPoolForUser(username, options = {}, store = null) {
+  const activeStore = store || readHomeTopicsStore();
+  const pool = await generateHomeTopicPoolForUser(username, options);
+  const previous = activeStore.users[username] || {};
+  activeStore.users[username] = {
+    topics: pool,
+    cursor: Number.isInteger(previous.cursor) ? previous.cursor : 0,
+    updatedAt: new Date().toISOString(),
+    triggerTopic: String(options.triggerTopic || '').trim() || null
+  };
+  writeHomeTopicsStore(activeStore);
+  saveGeneration('home-topics', crypto.randomUUID(), { username, options, topics: pool, createdAt: new Date().toISOString() });
+  return pool;
+}
+
+function queueHomeTopicPoolRefresh(username, options = {}) {
+  setTimeout(() => {
+    refreshHomeTopicPoolForUser(username, options).catch(e => {
+      console.error('Background home-topic refresh failed:', e.message);
+    });
+  }, 0);
+}
+
+// ---------- AI: topic suggestions for the home chips (fast cache + rotating window) ----------
+app.post('/api/ai/topics', auth, async (req, res) => {
+  const { count = 12, avoid = [], refresh = false, triggerTopic = '' } = req.body || {};
+  const wanted = Math.min(20, Math.max(6, parseInt(count, 10) || 12));
+  const avoidSet = new Set((Array.isArray(avoid) ? avoid : []).map(v => String(v || '').trim().toLowerCase()).filter(Boolean));
+  const store = readHomeTopicsStore();
+
+  if (refresh) {
+    try {
+      const pool = await refreshHomeTopicPoolForUser(req.user.username, { avoid, triggerTopic, poolSize: 24 }, store);
+      const entry = store.users[req.user.username] || { topics: pool, cursor: 0 };
+      const rotated = rotatePickFromList(entry.topics || pool, wanted, avoidSet, Number.isInteger(entry.cursor) ? entry.cursor : 0);
+      entry.cursor = rotated.nextCursor;
+      store.users[req.user.username] = entry;
+      writeHomeTopicsStore(store);
+      return res.json({ topics: rotated.items.map(name => ({ name, why: '' })), cached: false, poolUpdated: true });
+    } catch {
+      const rotated = rotatePickFromList(store.defaults || DEFAULT_HOME_TOPIC_POOL, wanted, avoidSet, 0);
+      return res.json({ topics: rotated.items.map(name => ({ name, why: '' })), cached: true, poolUpdated: false });
+    }
   }
+
+  const userEntry = store.users[req.user.username] || null;
+  const pool = normalizeTopicPool(userEntry?.topics, normalizeTopicPool(store.defaults, DEFAULT_HOME_TOPIC_POOL));
+  const hasUserPool = !!(userEntry && Array.isArray(userEntry.topics) && userEntry.topics.length);
+
+  if (!hasUserPool) {
+    store.users[req.user.username] = {
+      topics: pool,
+      cursor: 0,
+      updatedAt: new Date().toISOString(),
+      triggerTopic: null
+    };
+    writeHomeTopicsStore(store);
+    queueHomeTopicPoolRefresh(req.user.username, { avoid, triggerTopic, poolSize: 24 });
+  }
+
+  const entry = store.users[req.user.username] || { topics: pool, cursor: 0 };
+  const rotated = rotatePickFromList(entry.topics || pool, wanted, avoidSet, Number.isInteger(entry.cursor) ? entry.cursor : 0);
+  entry.cursor = rotated.nextCursor;
+  store.users[req.user.username] = entry;
+  writeHomeTopicsStore(store);
+  res.json({ topics: rotated.items.map(name => ({ name, why: '' })), cached: true, poolUpdated: false });
+});
+
+app.post('/api/ai/topics/preload', auth, (req, res) => {
+  const { avoid = [], triggerTopic = '' } = req.body || {};
+  queueHomeTopicPoolRefresh(req.user.username, { avoid, triggerTopic, poolSize: 24 });
+  res.json({ ok: true });
+});
+
+async function generateSuggestedPairForUser(username, { avoidTopics = [], triggerTopic = '' } = {}) {
+  const games = recentUserGames(username, 25);
+  const recent = games.slice(-12);
+  const sameField = [...new Set(recent.map(g => String(g.topic || '').trim()).filter(Boolean))].slice(-8);
+  const avoidSet = new Set((Array.isArray(avoidTopics) ? avoidTopics : []).map(v => String(v || '').trim().toLowerCase()).filter(Boolean));
+  const fallbackPair = makeFallbackPair(avoidSet, triggerTopic || sameField[sameField.length - 1] || '');
+
+  const ai = await generateStructured([
+    {
+      role: 'system',
+      content: `You are a study coach. Return JSON only with this exact schema:
+{"suggestions":[{"topic":string,"why":string,"honorableMentions":[string,string,string],"settings":{"level":string,"totalSlides":number,"paragraphLength":"brief"|"medium"|"detailed","paragraphCount":number,"tone":string,"complexity":"simple"|"standard"|"scholarly","imageDensity":"text-only"|"mostly-text"|"balanced"|"mostly-visual"},"customMessage":string},{"topic":string,"why":string,"honorableMentions":[string,string,string],"settings":{"level":string,"totalSlides":number,"paragraphLength":"brief"|"medium"|"detailed","paragraphCount":number,"tone":string,"complexity":"simple"|"standard"|"scholarly","imageDensity":"text-only"|"mostly-text"|"balanced"|"mostly-visual"},"customMessage":string}]}
+Rules:
+- Exactly 2 suggestions.
+- Gear suggestions toward the learner's recent interests and solving real problems.
+- Blend current global events/trends with the learner's progression history.
+- Topics must be short, classroom-safe, and distinct.
+- "why" must be concise (max 2 sentences).
+- settings are recommended defaults and must remain editable in the app.
+- totalSlides 2-20 and paragraphCount 1-7.`
+    },
+    {
+      role: 'user',
+      content: `Trigger topic from home interaction (if any): ${triggerTopic || 'none'}\n\nLearner recent history:\n${recent.map(g => `- ${g.finishedDate || g.finishedAt}: ${g.topic} / ${g.concept} (${g.level}) score ${g.correct}/${g.total}`).join('\n') || 'none yet'}\n\nInterest progression hints:\n${sameField.join('\n') || 'none'}\n\nCurrent trend seeds to consider:\n${GLOBAL_TREND_SEEDS.join('\n')}\n\nAvoid these topic names:\n${[...avoidSet].join('\n') || 'none'}`
+    }
+  ], { temperature: 0.78, maxTokens: 2600 });
+
+  const raw = Array.isArray(ai.suggestions) ? ai.suggestions : [];
+  const normalized = [0, 1].map(i => normalizeSuggestion(raw[i] || {}, fallbackPair[i], avoidSet));
+  const unique = normalized.filter((v, i, arr) => arr.findIndex(x => x.topic.toLowerCase() === v.topic.toLowerCase()) === i);
+  if (unique.length < 2) {
+    for (const fb of fallbackPair) {
+      if (unique.length >= 2) break;
+      if (!unique.some(v => v.topic.toLowerCase() === fb.topic.toLowerCase())) unique.push(fb);
+    }
+  }
+  return unique.slice(0, 2);
+}
+
+async function refreshSuggestedPairForUser(username, options = {}, store = null) {
+  const activeStore = store || readSuggestedStore();
+  const pair = await generateSuggestedPairForUser(username, options);
+  const previous = activeStore.users[username] || {};
+  activeStore.users[username] = {
+    pair,
+    cursor: Number.isInteger(previous.cursor) ? previous.cursor : 0,
+    lastShownTopic: String(previous.lastShownTopic || '').trim() || null,
+    updatedAt: new Date().toISOString(),
+    triggerTopic: String(options.triggerTopic || '').trim() || null
+  };
+  writeSuggestedStore(activeStore);
+  saveGeneration('suggestions', crypto.randomUUID(), {
+    username,
+    options,
+    pair,
+    createdAt: new Date().toISOString()
+  });
+  return pair;
+}
+
+function queueSuggestedPairRefresh(username, options = {}) {
+  setTimeout(() => {
+    refreshSuggestedPairForUser(username, options).catch(e => {
+      console.error('Background suggested-topic refresh failed:', e.message);
+    });
+  }, 0);
+}
+
+// ---------- AI: fast suggested topic from JSON preload pair ----------
+app.post('/api/ai/suggested-topic', auth, async (req, res) => {
+  const { avoidTopics = [], refresh = false, triggerTopic = '' } = req.body || {};
+  const avoidSet = new Set((Array.isArray(avoidTopics) ? avoidTopics : []).map(v => String(v || '').trim().toLowerCase()).filter(Boolean));
+  const store = readSuggestedStore();
+
+  if (refresh) {
+    try {
+      const pair = await refreshSuggestedPairForUser(req.user.username, { avoidTopics, triggerTopic }, store);
+      const entry = store.users[req.user.username] || { pair, lastShownTopic: null };
+      const picked = randomPickSuggestionNoRepeat(entry.pair || pair, avoidSet, entry.lastShownTopic) || pair[0] || DEFAULT_SUGGESTION_PAIR[0];
+      entry.lastShownTopic = picked.topic;
+      store.users[req.user.username] = entry;
+      writeSuggestedStore(store);
+      return res.json({ ...picked, cached: false, pairUpdated: true });
+    } catch {
+      const fallback = makeFallbackPair(avoidSet, triggerTopic)[0];
+      return res.json({ ...fallback, cached: true, pairUpdated: false });
+    }
+  }
+
+  const userPair = Array.isArray(store.users?.[req.user.username]?.pair)
+    ? store.users[req.user.username].pair.filter(isValidSuggestion)
+    : [];
+  const defaults = (Array.isArray(store.defaults) && store.defaults.length)
+    ? store.defaults.filter(isValidSuggestion)
+    : DEFAULT_SUGGESTION_PAIR;
+
+  const activePair = userPair.length ? userPair : defaults;
+  if (!userPair.length) {
+    store.users[req.user.username] = {
+      pair: activePair.slice(0, 2),
+      cursor: 0,
+      lastShownTopic: null,
+      updatedAt: new Date().toISOString(),
+      triggerTopic: null
+    };
+    writeSuggestedStore(store);
+    queueSuggestedPairRefresh(req.user.username, { avoidTopics, triggerTopic });
+  }
+
+  const entry = store.users[req.user.username] || { pair: activePair, lastShownTopic: null };
+  const picked = randomPickSuggestionNoRepeat(entry.pair || activePair, avoidSet, entry.lastShownTopic) || activePair[0] || DEFAULT_SUGGESTION_PAIR[0];
+  entry.lastShownTopic = picked.topic;
+  store.users[req.user.username] = entry;
+  writeSuggestedStore(store);
+  res.json({ ...picked, cached: true, pairUpdated: false });
+});
+
+// ---------- AI: background preload refresh after home-page interactions ----------
+app.post('/api/ai/suggested-topic/preload', auth, (req, res) => {
+  const { avoidTopics = [], triggerTopic = '' } = req.body || {};
+  queueSuggestedPairRefresh(req.user.username, { avoidTopics, triggerTopic });
+  res.json({ ok: true });
 });
 
 // ---------- AI: refresh concepts for one level only ----------
