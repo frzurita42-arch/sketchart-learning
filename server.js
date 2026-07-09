@@ -1554,6 +1554,66 @@ function summarizeLearnerStatus(games = []) {
   return lines.join('\n');
 }
 
+// Offline fallback for the "Suggest topic + settings" button: varied every call and
+// grounded in the learner's history, so that when no AI provider is reachable the
+// button still rotates through diverse, personalized suggestions instead of one fixed topic.
+function buildStructuredSuggestFallback(games = [], avoidSet = new Set()) {
+  const pool = [
+    { prompt: 'Bayes theorem for medical test interpretation', exampleType: 'proof', symbolic: true },
+    { prompt: 'Taylor series approximation of sin(x)', exampleType: 'proof', symbolic: true },
+    { prompt: 'Dijkstra shortest-path algorithm, step by step', exampleType: 'tree-diagram', symbolic: true },
+    { prompt: 'Supply and demand equilibrium with elasticity', exampleType: 'graph-table', symbolic: false },
+    { prompt: 'Entropy and information gain in decision trees', exampleType: 'graph-table', symbolic: true },
+    { prompt: 'Eigenvalues and eigenvectors, the geometric picture', exampleType: 'worked-example', symbolic: true },
+    { prompt: 'The central limit theorem: intuition and proof sketch', exampleType: 'proof', symbolic: true },
+    { prompt: 'Gradient descent: the update rule and why it converges', exampleType: 'worked-example', symbolic: true },
+    { prompt: 'Big-O analysis of common sorting algorithms', exampleType: 'graph-table', symbolic: true },
+    { prompt: 'Causes and consequences of the Industrial Revolution', exampleType: 'outline', symbolic: false },
+    { prompt: 'How mRNA vaccines train the immune system', exampleType: 'outline', symbolic: false },
+    { prompt: 'Photosynthesis: the light and dark reactions', exampleType: 'outline', symbolic: false },
+    { prompt: "Newton's laws applied to orbital motion", exampleType: 'worked-example', symbolic: true },
+    { prompt: 'Compound interest and the time value of money', exampleType: 'worked-example', symbolic: true }
+  ];
+
+  // Reinforce weak spots first: pull concepts the learner is scoring low on.
+  const byConcept = new Map();
+  for (const g of (Array.isArray(games) ? games : [])) {
+    if (!g || !(Number(g.total) > 0)) continue;
+    const key = `${g.topic} / ${g.concept}`.trim();
+    const a = byConcept.get(key) || { c: 0, t: 0, topic: g.topic, concept: g.concept };
+    a.c += Number(g.correct) || 0; a.t += Number(g.total) || 0;
+    byConcept.set(key, a);
+  }
+  const weakFirst = [];
+  for (const [, v] of byConcept) {
+    if (v.t && v.c / v.t < 0.6) {
+      weakFirst.push({ prompt: `${v.concept || v.topic}: targeted practice to fix a weak spot`, exampleType: 'worked-example', symbolic: /math|calc|algebra|probab|statistic|physics|algorithm|proof/i.test(`${v.topic} ${v.concept}`) });
+    }
+  }
+
+  const candidates = [...weakFirst, ...pool].filter(c => c.prompt && !avoidSet.has(c.prompt.toLowerCase()));
+  const list = candidates.length ? candidates : pool;
+  // Bias toward the front (weak spots) but keep it varied across clicks.
+  const span = Math.min(list.length, weakFirst.length ? weakFirst.length + 4 : list.length);
+  const chosen = list[Math.floor(Math.random() * span)];
+
+  const profile = summarizeLearnerVisualProfile(games);
+  const level = profile.avgScore < 0.55 ? 'Lower Intermediate' : profile.avgScore > 0.82 ? 'Advanced' : 'Upper Intermediate';
+  const complexity = profile.avgScore < 0.55 ? 'simple' : profile.avgScore > 0.82 ? 'scholarly' : 'standard';
+  return {
+    prompt: chosen.prompt,
+    exampleType: chosen.exampleType || 'worked-example',
+    level,
+    tone: 'Friendly lecture',
+    complexity,
+    paragraphLength: 'medium',
+    imageDensity: chosen.symbolic ? 'mostly-text' : 'balanced',
+    totalSlides: 8,
+    continuation: 'related-topics',
+    alternateVisualMath: !!chosen.symbolic
+  };
+}
+
 function summarizeLearnerVisualProfile(games = []) {
   const recent = Array.isArray(games) ? games.slice(-12) : [];
   if (!recent.length) return { avgScore: 0.65, lowConfidence: false, note: 'no prior history available' };
@@ -2428,21 +2488,13 @@ app.post('/api/ai/structured-explanation-suggest', auth, async (req, res) => {
   const { avoidPrompts = [] } = req.body || {};
   const avoidSet = new Set((Array.isArray(avoidPrompts) ? avoidPrompts : []).map(v => String(v || '').trim().toLowerCase()).filter(Boolean));
 
-  const fallback = {
-    prompt: 'Bayes theorem for medical test interpretation',
-    exampleType: 'proof',
-    level: 'Upper Intermediate',
-    tone: 'Friendly lecture',
-    complexity: 'standard',
-    paragraphLength: 'medium',
-    imageDensity: 'balanced',
-    totalSlides: 8,
-    continuation: 'related-topics',
-    alternateVisualMath: true
-  };
+  let games = [];
+  try { games = await recentUserGames(req.user.username, 20); } catch { games = []; }
+  // Varied, history-grounded default used both to fill any gaps in the AI reply and
+  // when no AI provider is reachable (so repeated clicks never return one fixed topic).
+  const fallback = buildStructuredSuggestFallback(games, avoidSet);
 
   try {
-    const games = await recentUserGames(req.user.username, 20);
     const interests = [...new Set(games.map(g => `${g.topic} / ${g.concept}`).filter(Boolean))].slice(-12);
     const status = summarizeLearnerStatus(games);
     const result = await generateStructured([
@@ -2484,7 +2536,8 @@ Return JSON only with this schema:
 
     res.json(out);
   } catch {
-    res.json(fallback);
+    // Fresh varied pick each call so the button rotates instead of repeating one topic.
+    res.json(buildStructuredSuggestFallback(games, avoidSet));
   }
 });
 
