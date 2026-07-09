@@ -1072,6 +1072,9 @@ async function generateText(messages, opts) {
       throw e;
     }
   }
+  if (!deepseekEnabled) {
+    throw new Error('No AI provider key is configured. Set GEMINI_API_KEY or DEEPSEEK_API_KEY in environment variables.');
+  }
   return deepseek(messages, opts);
 }
 
@@ -1093,6 +1096,30 @@ async function generateStructured(messages, opts = {}, { attempts = 3 } = {}) {
     }
   }
   throw lastErr || new Error('Could not generate structured JSON');
+}
+
+function makeFallbackLearningPath(topic, wantedLevels) {
+  const normalizedTopic = String(topic || 'General studies').trim() || 'General studies';
+  const templates = {
+    Beginner: ['Core vocabulary', 'Big-picture overview', 'Everyday examples', 'Common misconceptions'],
+    'Lower Intermediate': ['Cause and effect', 'Key frameworks', 'Simple data interpretation', 'Practical decisions'],
+    'Upper Intermediate': ['Trade-offs and constraints', 'Comparative analysis', 'Scenario planning', 'Structured critique'],
+    Advanced: ['Systems interactions', 'Edge cases', 'Method evaluation', 'Implementation strategy'],
+    PhD: ['Research gaps', 'Competing theories', 'Experimental design', 'Future directions']
+  };
+
+  return {
+    topic: normalizedTopic,
+    overview: `This fallback path introduces ${normalizedTopic} step by step and focuses on practical understanding. It can be used while AI providers are temporarily unavailable.`,
+    levels: wantedLevels.map((level) => ({
+      level,
+      description: `Focused progression for ${normalizedTopic} at ${level} level.`,
+      concepts: (templates[level] || templates.Beginner).map((name, idx) => ({
+        name: `${normalizedTopic}: ${name}`,
+        blurb: `Concept ${idx + 1} for ${level} mastery`
+      }))
+    }))
+  };
 }
 
 // Strip anything executable from AI-generated SVG before it reaches the browser.
@@ -1274,6 +1301,10 @@ app.post('/api/ai/path', auth, async (req, res) => {
   }
 
   try {
+    if (!geminiEnabled && !deepseekEnabled) {
+      const fallback = makeFallbackLearningPath(topic, wanted);
+      return res.json({ ...fallback, fallback: true });
+    }
     const result = await generateStructured([
       {
         role: 'system',
