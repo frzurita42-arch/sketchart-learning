@@ -93,6 +93,11 @@ function recentUserGames(username, limit = 20) {
     .slice(-limit);
 }
 
+function buildBaseUrl(req) {
+  const host = req.get('host');
+  return `${req.protocol}://${host}`;
+}
+
 // ---------- users ----------
 function hashPassword(password, salt) {
   return crypto.scryptSync(String(password), salt, 64).toString('hex');
@@ -226,10 +231,16 @@ app.delete('/api/users/:username', auth, adminOnly, (req, res) => {
 // ---------- game records ----------
 app.post('/api/games', auth, (req, res) => {
   const games = readJSON('games.json', []);
+  const shareId = String(req.body.shareId || crypto.randomUUID()).trim();
+  const shareUrl = String(req.body.shareUrl || `${buildBaseUrl(req)}/report/${shareId}`).trim();
   const record = {
     id: crypto.randomUUID(),
+    shareId,
+    shareUrl,
     username: req.user.username,
     finishedAt: new Date().toISOString(),
+    finishedDate: new Date().toLocaleDateString('en-US'),
+    finishedTime: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
     topic: req.body.topic,
     concept: req.body.concept,
     level: req.body.level,
@@ -238,11 +249,14 @@ app.post('/api/games', auth, (req, res) => {
     correct: req.body.correct,
     total: req.body.total,
     durationSec: req.body.durationSec,
-    recommendations: req.body.recommendations || null
+    recommendations: req.body.recommendations || null,
+    questionSummary: req.body.questionSummary || null,
+    answerSummary: req.body.answerSummary || null,
+    aiNotes: req.body.aiNotes || null
   };
   games.push(record);
   writeJSON('games.json', games);
-  res.json({ ok: true, id: record.id });
+  res.json({ ok: true, id: record.id, shareId: record.shareId, shareUrl: record.shareUrl, finishedAt: record.finishedAt });
 });
 
 app.get('/api/games', auth, (req, res) => {
@@ -254,14 +268,105 @@ app.get('/api/games/export.csv', auth, (req, res) => {
   const games = readJSON('games.json', []);
   const mine = req.user.role === 'admin' ? games : games.filter(g => g.username === req.user.username);
   const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const rows = [['user', 'date', 'topic', 'concept', 'level', 'correct', 'total', 'score_pct', 'duration_sec']];
+  const rows = [['user', 'date', 'time', 'topic', 'concept', 'level', 'correct', 'total', 'score_pct', 'duration_sec', 'question_summary', 'answer_summary', 'ai_notes', 'share_url']];
   for (const g of mine) {
-    rows.push([g.username, g.finishedAt, g.topic, g.concept, g.level, g.correct, g.total,
-      g.total ? Math.round(100 * g.correct / g.total) : 0, g.durationSec]);
+    rows.push([
+      g.username,
+      g.finishedDate || g.finishedAt,
+      g.finishedTime || '',
+      g.topic,
+      g.concept,
+      g.level,
+      g.correct,
+      g.total,
+      g.total ? Math.round(100 * g.correct / g.total) : 0,
+      g.durationSec,
+      Array.isArray(g.questionSummary) ? g.questionSummary.join(' | ') : (g.questionSummary || ''),
+      Array.isArray(g.answerSummary) ? g.answerSummary.join(' | ') : (g.answerSummary || ''),
+      Array.isArray(g.aiNotes) ? g.aiNotes.join(' | ') : (g.aiNotes || ''),
+      g.shareUrl || ''
+    ]);
   }
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename="sketchlearn-progress.csv"');
   res.send(rows.map(r => r.map(esc).join(',')).join('\n'));
+});
+
+app.delete('/api/games/:gameId', auth, adminOnly, (req, res) => {
+  const games = readJSON('games.json', []);
+  const before = games.length;
+  const next = games.filter(g => g.id !== req.params.gameId && g.shareId !== req.params.gameId);
+  if (next.length === before) return res.status(404).json({ error: 'No such game' });
+  writeJSON('games.json', next);
+  res.json({ ok: true });
+});
+
+app.get('/report/:shareId', (req, res) => {
+  const games = readJSON('games.json', []);
+  const game = games.find(g => g.shareId === req.params.shareId || g.id === req.params.shareId);
+  if (!game) return res.status(404).send('<h1>Report not found</h1>');
+
+  const esc = v => String(v ?? '').replace(/[&<>\"]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
+  const splitList = value => Array.isArray(value) ? value : String(value || '').split(',').map(s => s.trim()).filter(Boolean);
+  const questionItems = splitList(game.questionSummary);
+  const answerItems = splitList(game.answerSummary);
+  const notes = Array.isArray(game.aiNotes) ? game.aiNotes : (game.aiNotes ? [game.aiNotes] : []);
+  const recs = game.recommendations || {};
+  const dateTime = `${esc(game.finishedDate || new Date(game.finishedAt).toLocaleDateString())} ${esc(game.finishedTime || new Date(game.finishedAt).toLocaleTimeString())}`;
+
+  res.send(`<!doctype html>
+  <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>SketchLearn Report</title>
+  <style>
+    body{font-family:Arial,sans-serif;background:#f7f3e9;color:#2d2a26;margin:0;padding:24px;}
+    .card{max-width:1100px;margin:0 auto;background:#fffdf6;border:2px solid #2d2a26;border-radius:24px;padding:20px;box-shadow:3px 4px 0 rgba(45,42,38,.25)}
+    h1,h2{margin:0 0 12px} h1{font-size:30px} h2{font-size:22px;margin-top:18px}
+    .meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin:14px 0}
+    .pill{border:1px solid #2d2a26;border-radius:999px;padding:8px 12px;background:#fff}
+    .grid{display:grid;grid-template-columns:1.4fr .8fr;gap:18px} .box{background:#fff;border:1px solid #2d2a26;border-radius:18px;padding:14px}
+    table{width:100%;border-collapse:collapse;background:#fff;overflow:auto} th,td{border:1px solid #2d2a26;padding:8px;vertical-align:top;text-align:left} th{background:#fadf63}
+    .muted{opacity:.8} .notes li{margin-bottom:6px} a{color:#5c80bc} .list{margin:6px 0 0 20px}
+    @media (max-width:900px){.grid{grid-template-columns:1fr}}
+  </style></head><body><div class="card">
+    <h1>SketchLearn Progress Report</h1>
+    <div class="muted">Shared link created on ${dateTime}</div>
+    <div class="meta">
+      <div class="pill"><b>Student</b><br>${esc(game.username)}</div>
+      <div class="pill"><b>Topic</b><br>${esc(game.topic)}</div>
+      <div class="pill"><b>Concept</b><br>${esc(game.concept)}</div>
+      <div class="pill"><b>Level</b><br>${esc(game.level)}</div>
+      <div class="pill"><b>Score</b><br>${esc(game.correct)}/${esc(game.total)}</div>
+      <div class="pill"><b>Time</b><br>${Math.floor((game.durationSec || 0) / 60)}:${String((game.durationSec || 0) % 60).padStart(2, '0')}</div>
+    </div>
+    <div class="grid">
+      <div class="box">
+        <h2>Summary</h2>
+        <p><b>Question summary:</b></p>
+        <ul class="list">${questionItems.length ? questionItems.map(n => `<li>${esc(n)}</li>`).join('') : '<li>No question summary saved.</li>'}</ul>
+        <p><b>Answer summary:</b></p>
+        <ul class="list">${answerItems.length ? answerItems.map(n => `<li>${esc(n)}</li>`).join('') : '<li>No answer summary saved.</li>'}</ul>
+        <p><b>Coach summary:</b> ${esc(recs.summary || 'No coach summary saved.')}</p>
+        <h2>Question Table</h2>
+        <div style="overflow:auto"><table>
+          <tr><th>#</th><th>Question</th><th>Answer</th><th>Result</th><th>Misconception / note</th></tr>
+          ${(game.slides || []).map((s, i) => `<tr>
+            <td>${i + 1}</td>
+            <td>${esc(s.question)}</td>
+            <td>${esc(s.chosen)}</td>
+            <td>${s.correct ? 'Correct' : 'Wrong'}</td>
+            <td>${esc(s.misconception || '')}</td>
+          </tr>`).join('') || '<tr><td colspan="5">No slide data.</td></tr>'}
+        </table></div>
+      </div>
+      <div class="box">
+        <h2>AI Notes</h2>
+        <ul class="notes">${notes.length ? notes.map(n => `<li>${esc(n)}</li>`).join('') : '<li>No AI notes saved.</li>'}</ul>
+        ${Array.isArray(recs.recommendations) && recs.recommendations.length ? `<h2>Recommendations</h2><ul class="notes">${recs.recommendations.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}
+        ${Array.isArray(recs.nextConcepts) && recs.nextConcepts.length ? `<h2>Try next</h2><ul class="notes">${recs.nextConcepts.map(n => `<li>${esc(n.name)}${n.level ? ` (${esc(n.level)})` : ''}</li>`).join('')}</ul>` : ''}
+        <p><b>Share URL</b><br><a href="${esc(game.shareUrl || '')}">${esc(game.shareUrl || '')}</a></p>
+      </div>
+    </div>
+  </div></body></html>`);
 });
 
 // ---------- DeepSeek helpers ----------
@@ -784,22 +889,33 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
 // ---------- AI: end-of-game recommendations ----------
 app.post('/api/ai/recommend', auth, async (req, res) => {
   const { topic, concept, level, correct, total, durationSec, slides = [] } = req.body || {};
+  const history = recentUserGames(req.user.username, 12);
   try {
     const result = await generateStructured([
       {
         role: 'system',
         content: `You are a learning coach. Given a learner's quiz performance, respond ONLY with JSON:
-{"summary": string (2 sentences, warm, specific), "recommendations": [string, string, string], "nextConcepts": [{"name": string, "level": string}]}
-Recommendations must reference the actual mistakes made. nextConcepts: 2-3 concepts to study next.`
+{"summary": string (2 sentences, warm, specific), "questionSummary": [string, string, string], "answerSummary": [string, string, string], "aiNotes": [string, string, string], "recommendations": [string, string, string], "nextConcepts": [{"name": string, "level": string}]}
+Recommendations must reference the actual mistakes made. questionSummary should list the main question themes in this lesson. answerSummary should list the learner's answer patterns or choices. aiNotes should compare this lesson against the recent history below and explain the learner's progress in the same field, with specific next steps. nextConcepts: 2-3 concepts to study next.`
       },
       {
         role: 'user',
-        content: `Topic: ${topic}, concept: ${concept}, level: ${level}. Score ${correct}/${total} in ${durationSec}s.\nAnswers:\n` +
+        content: `Topic: ${topic}, concept: ${concept}, level: ${level}. Score ${correct}/${total} in ${durationSec}s.\n\nRecent lessons in the same field:\n${history.filter(g => g.topic === topic).map(g => `- ${g.finishedDate || g.finishedAt}: ${g.concept} (${g.level}) ${g.correct}/${g.total}`).join('\n') || 'none yet'}\n\nAnswers:\n` +
           slides.map((s, i) => `${i + 1}. "${s.question}" → chose "${s.chosen}" (${s.correct ? 'correct' : `wrong — misconception: ${s.misconception || 'unknown'}`})`).join('\n')
       }
     ], { temperature: 0.7, maxTokens: 4096 });
-    saveGeneration('recommendations', crypto.randomUUID(), { username: req.user.username, topic, concept, result, createdAt: new Date().toISOString() });
-    res.json(result);
+    const questionSummary = slides.map(s => String(s.question || '').trim()).filter(Boolean);
+    const answerSummary = slides.map(s => String(s.chosen || '').trim()).filter(Boolean);
+    const normalized = {
+      summary: String(result.summary || '').trim(),
+      questionSummary,
+      answerSummary,
+      aiNotes: Array.isArray(result.aiNotes) ? result.aiNotes.map(v => String(v).trim()).filter(Boolean) : [],
+      recommendations: Array.isArray(result.recommendations) ? result.recommendations.map(v => String(v).trim()).filter(Boolean) : [],
+      nextConcepts: Array.isArray(result.nextConcepts) ? result.nextConcepts : []
+    };
+    saveGeneration('recommendations', crypto.randomUUID(), { username: req.user.username, topic, concept, result: normalized, createdAt: new Date().toISOString() });
+    res.json(normalized);
   } catch (e) {
     res.status(502).json({ error: e.message });
   }

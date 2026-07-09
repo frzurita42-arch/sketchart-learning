@@ -570,6 +570,8 @@ async function finishGame() {
   const durationSec = Math.floor((Date.now() - g.startTime) / 1000);
   const correct = g.answers.filter(a => a.correct).length;
   const total = g.answers.length;
+  const questionSummary = g.answers.map(a => a.question).filter(Boolean).join(', ');
+  const answerSummary = g.answers.map(a => a.chosen).filter(Boolean).join(', ');
 
   $app.innerHTML = loadingHTML('Grading your sketchbook…');
 
@@ -582,27 +584,39 @@ async function finishGame() {
   } catch { /* recommendations are a bonus; stats still shown */ }
 
   let saveNote = '';
+  let saved = null;
   try {
-    await API.post('/api/games', {
+    saved = await API.post('/api/games', {
       topic: g.topic, concept: g.concept, level: g.level, settings: g.settings,
-      slides: g.answers, correct, total, durationSec, recommendations: rec
+      slides: g.answers, correct, total, durationSec, recommendations: rec,
+      questionSummary,
+      answerSummary,
+      aiNotes: rec?.aiNotes || []
     });
   } catch (e) { saveNote = `<p class="form-error">Could not save this run: ${esc(e.message)}</p>`; }
 
   const mins = `${Math.floor(durationSec / 60)}:${String(durationSec % 60).padStart(2, '0')}`;
+  const shareUrl = saved?.shareUrl || '';
   $app.innerHTML = `
     <div class="slide-shell">
       <div class="slide">
         <h2>🏁 ${esc(g.concept)} — your results</h2>
         <p><b>${esc(API.user.username)}</b> · ${esc(g.level)} · ${esc(g.topic)}</p>
+        <p class="muted-line">Completed on ${esc(new Date().toLocaleDateString())} at ${esc(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</p>
         <div class="stat-row">
           <div class="stat-tile"><div class="big">${correct}/${total}</div>correct</div>
           <div class="stat-tile"><div class="big">${total ? Math.round(100 * correct / total) : 0}%</div>score</div>
           <div class="stat-tile"><div class="big">${mins}</div>time</div>
         </div>
+        ${shareUrl ? `<div class="share-box"><div><b>Shareable report</b><br><a href="${esc(shareUrl)}" target="_blank" rel="noreferrer">${esc(shareUrl)}</a></div><button class="btn small" id="copy-share">Copy link</button></div>` : ''}
+        <div class="summary-grid">
+          <div class="summary-card"><b>Question summary</b><p>${esc(questionSummary || `Questions focused on ${g.concept} at ${g.level}.`)}</p></div>
+          <div class="summary-card"><b>Answer summary</b><p>${esc(answerSummary || `${correct}/${total} answers were correct.`)}</p></div>
+        </div>
+        ${Array.isArray(rec?.aiNotes) && rec.aiNotes.length ? `<div class="quiz-feedback" style="margin-top:14px"><b>AI notes</b><ul style="padding-left:22px;margin-top:6px">${rec.aiNotes.map(n => `<li>${esc(n)}</li>`).join('')}</ul></div>` : ''}
         <div class="table-wrap"><table class="sketch">
-          <tr><th>#</th><th>Question</th><th>Your answer</th><th>Result</th></tr>
-          ${g.answers.map(a => `<tr><td>${a.slide}</td><td>${esc(a.question)}</td><td>${esc(a.chosen)}</td><td>${a.correct ? '✔' : '✘'}</td></tr>`).join('')}
+          <tr><th>#</th><th>Question</th><th>Your answer</th><th>Result</th><th>Question summary</th><th>Answer summary</th><th>AI notes</th></tr>
+          ${g.answers.map(a => `<tr><td>${a.slide}</td><td>${esc(a.question)}</td><td>${esc(a.chosen)}</td><td>${a.correct ? '✔' : '✘'}</td><td class="clamped">${esc(questionSummary)}</td><td class="clamped">${esc(answerSummary)}</td><td class="clamped">${esc(Array.isArray(rec?.aiNotes) ? rec.aiNotes.join(' · ') : '')}</td></tr>`).join('')}
         </table></div>
         ${rec ? `
           <div class="quiz-feedback" style="margin-top:18px">
@@ -634,6 +648,19 @@ async function viewStats() {
   const totalCorrect = mine.reduce((s, g) => s + (g.correct || 0), 0);
   const totalQ = mine.reduce((s, g) => s + (g.total || 0), 0);
   const totalTime = mine.reduce((s, g) => s + (g.durationSec || 0), 0);
+  const isAdmin = API.user.role === 'admin';
+  const emptyColspan = isAdmin ? 11 : 10;
+  const normalizeList = (value, fallback = []) => {
+    if (Array.isArray(value)) return value.map(v => String(v || '').trim()).filter(Boolean);
+    const text = String(value || '').trim();
+    if (!text) return fallback;
+    return text.split(/\s*[·,|]\s*/).map(v => v.trim()).filter(Boolean);
+  };
+  const renderListCell = (items, emptyText = '') => {
+    const list = normalizeList(items, Array.isArray(emptyText) ? emptyText : (emptyText ? [emptyText] : []));
+    if (!list.length) return esc(emptyText);
+    return `<ul class="sheet-list">${list.map(item => `<li>${esc(item)}</li>`).join('')}</ul>`;
+  };
   $app.innerHTML = `
     <h1 class="view-title">My <span class="scribble-underline">stats</span></h1>
     <div class="stat-row">
@@ -641,17 +668,26 @@ async function viewStats() {
       <div class="stat-tile"><div class="big">${totalQ ? Math.round(100 * totalCorrect / totalQ) : 0}%</div>avg score</div>
       <div class="stat-tile"><div class="big">${Math.round(totalTime / 60)}m</div>time learning</div>
     </div>
-    <div class="card">
-      <div class="table-wrap"><table class="sketch">
-        <tr><th>Date</th><th>Topic</th><th>Concept</th><th>Level</th><th>Score</th><th>Time</th></tr>
-        ${mine.slice().reverse().map(g => `<tr>
-          <td>${new Date(g.finishedAt).toLocaleDateString()}</td><td>${esc(g.topic)}</td><td>${esc(g.concept)}</td>
-          <td>${esc(g.level)}</td><td>${g.correct}/${g.total}</td><td>${Math.floor(g.durationSec / 60)}:${String(g.durationSec % 60).padStart(2, '0')}</td>
-        </tr>`).join('') || '<tr><td colspan="6">Nothing yet — go learn something!</td></tr>'}
-      </table></div>
-      <div class="slide-actions" style="justify-content:flex-start">
-        <button class="btn small" id="export-csv">⬇ Download progress spreadsheet (CSV)</button>
-        <button class="btn small ghost" id="change-pass">Change my password</button>
+    <div class="stats-layout">
+      <div class="stats-main card">
+        <div class="table-wrap"><table class="sketch">
+          <tr><th>Date</th><th>Time</th><th>Topic</th><th>Concept</th><th>Level</th><th>Score</th><th>Question summary</th><th>Answer summary</th><th>AI notes</th><th>Share</th>${isAdmin ? '<th>Admin</th>' : ''}</tr>
+          ${mine.slice().reverse().map(g => `<tr class="stats-row" data-game-id="${esc(g.id || '')}">
+            <td>${esc(g.finishedDate || new Date(g.finishedAt).toLocaleDateString())}</td>
+            <td>${esc(g.finishedTime || new Date(g.finishedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))}</td>
+            <td>${esc(g.topic)}</td><td>${esc(g.concept)}</td>
+            <td>${esc(g.level)}</td><td>${g.correct}/${g.total}</td>
+            <td class="summary-cell">${renderListCell(g.questionSummary, (g.slides || []).map(s => s.question).filter(Boolean).join(' · '))}</td>
+            <td class="summary-cell">${renderListCell(g.answerSummary, (g.slides || []).map(s => s.chosen).filter(Boolean).join(' · '))}</td>
+            <td class="summary-cell">${renderListCell(g.aiNotes, g.recommendations?.summary ? [g.recommendations.summary] : '')}</td>
+            <td>${(g.shareUrl || g.shareId || g.id) ? `<a href="${esc(g.shareUrl || `/report/${encodeURIComponent(g.shareId || g.id)}`)}" target="_blank" rel="noreferrer">open</a>` : ''}</td>
+            ${isAdmin ? `<td>${g.id ? `<button class="btn small ghost delete-game" data-game-id="${esc(g.id)}">Delete</button>` : ''}</td>` : ''}
+          </tr>`).join('') || `<tr><td colspan="${emptyColspan}">Nothing yet — go learn something!</td></tr>`}
+        </table></div>
+        <div class="slide-actions" style="justify-content:flex-start">
+          <button class="btn small" id="export-csv">⬇ Download progress spreadsheet (CSV)</button>
+          <button class="btn small ghost" id="change-pass">Change my password</button>
+        </div>
       </div>
     </div>`;
   document.getElementById('export-csv').addEventListener('click', downloadCsv);
@@ -661,6 +697,17 @@ async function viewStats() {
     try { await API.post(`/api/users/${encodeURIComponent(API.user.username)}/password`, { password: p }); alert('Password changed!'); }
     catch (e) { alert(e.message); }
   });
+  $app.querySelectorAll('.delete-game').forEach(btn => btn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const gameId = btn.dataset.gameId;
+    if (!gameId || !confirm('Delete this lesson record?')) return;
+    try {
+      await API.del(`/api/games/${encodeURIComponent(gameId)}`);
+      viewStats();
+    } catch (err) {
+      alert(err.message);
+    }
+  }));
 }
 
 async function downloadCsv() {
@@ -685,8 +732,16 @@ function viewChat() {
         <textarea id="chat-input" placeholder="Ask what to study next, or how the site works…"></textarea>
         <button class="btn primary" id="chat-send">Send</button>
       </div>
+      <div class="slide-actions" style="justify-content:flex-end;margin-top:10px">
+        <button class="btn small ghost" id="chat-clear">Clear chat</button>
+      </div>
     </div>`;
   document.getElementById('chat-export').addEventListener('click', downloadCsv);
+  document.getElementById('chat-clear').addEventListener('click', () => {
+    if (!confirm('Clear the chat window?')) return;
+    state.chat = [{ role: 'assistant', content: "Hi! I'm your SketchLearn coach. I can see your progress spreadsheet and help you pick what to study next, or explain how to use the site. What are you curious about?" }];
+    renderChatLog();
+  });
   renderChatLog();
   const send = async () => {
     const input = document.getElementById('chat-input');
