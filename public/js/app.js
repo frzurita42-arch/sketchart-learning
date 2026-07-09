@@ -732,7 +732,7 @@ function viewChat() {
         <textarea id="chat-input" placeholder="Ask what to study next, or how the site works…"></textarea>
         <button class="btn primary" id="chat-send">Send</button>
       </div>
-      <div class="slide-actions" style="justify-content:flex-end;margin-top:10px">
+      <div class="slide-actions" style="justify-content:flex-start;margin-top:10px">
         <button class="btn small ghost" id="chat-clear">Clear chat</button>
       </div>
     </div>`;
