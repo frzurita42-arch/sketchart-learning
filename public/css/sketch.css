@@ -75,6 +75,14 @@ h3 { font-size: 1.5rem; }
   border-top: 3px dashed var(--ink);
   padding-top: 20px;
 }
+/* Dashed divider above each activity's title, so the home feed reads as clear
+   divisions — one line above every section (Learning path, Suggested topic,
+   Time Travel, Structured Explanations). */
+.activity-heading {
+  border-top: 3px dashed var(--ink);
+  padding-top: 18px;
+  margin-top: 10px;
+}
 .view-sub { text-align: center; opacity: .8; margin-bottom: 26px; }
 
 /* ---------- cards ---------- */

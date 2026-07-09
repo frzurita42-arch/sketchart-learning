@@ -269,7 +269,7 @@ function renderHomeFeed() {
 function renderLearningPathSection() {
   return `
     <section style="max-width:860px;margin:18px auto 0">
-      <h4 style="margin:0 0 6px;opacity:.9;max-width:760px">Start a Learning path</h4>
+      <h4 class="activity-heading" style="margin:0 0 6px;opacity:.9;max-width:760px">Start a Learning path</h4>
       <div class="chip-row">${state.homeTopics.map(t => `<button class="chip" data-topic="${esc(t)}">${esc(t)}</button>`).join('')}</div>
       <div class="slide-actions" style="justify-content:center;margin-top:10px">
         <button class="btn small blue" id="refresh-home-topics">↻ Refresh 12 topic ideas</button>
@@ -304,7 +304,7 @@ function renderSuggestedTopicSection() {
   ].join(' | ');
   return `
     <section style="max-width:760px;margin:36px auto 0">
-      <h4 style="margin:0 0 2px;opacity:.9">Suggested topic</h4>
+      <h4 class="activity-heading" style="margin:0 0 2px;opacity:.9">Suggested topic</h4>
       <div class="card" style="max-width:760px;margin:0 auto 0;padding:14px 16px">
       <div class="slide-actions" style="justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
         ${hasSuggestion ? `<p style="margin:0;font-weight:700">${esc(s.topic)}</p>` : ''}
@@ -331,7 +331,7 @@ function renderTimeTravelActivitySection() {
   const tt = state.timeTravel || {};
   return `
       <section style="max-width:760px;margin:24px auto 0">
-      <h4 style="margin:0 0 6px;opacity:.9">Time Travel Activity</h4>
+      <h4 class="activity-heading" style="margin:0 0 6px;opacity:.9">Time Travel Activity</h4>
       <div class="card alt" style="max-width:760px;margin:0 auto 0;padding:14px 16px">
         <div class="slide-actions" style="justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">
           <span style="font-weight:600">Custom headline</span>
@@ -387,7 +387,7 @@ function renderStructuredExplanationsSection() {
   const ml = state.latexLab || {};
   return `
       <section style="max-width:760px;margin:24px auto 0">
-        <h4 style="margin:0 0 6px;opacity:.9">Structured Explanations</h4>
+        <h4 class="activity-heading" style="margin:0 0 6px;opacity:.9">Structured Explanations</h4>
       
       <div class="card alt" style="max-width:760px;margin:0 auto 0;padding:14px 16px">
         <div class="slide-actions" style="justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">
