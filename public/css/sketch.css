@@ -67,7 +67,14 @@ h3 { font-size: 1.5rem; }
 
 /* ---------- layout ---------- */
 #app { max-width: 1000px; margin: 0 auto; padding: 26px 16px 70px; }
-.view-title { text-align: center; margin-bottom: 6px; }
+/* Dashed rule above every activity title — same separator as the footer/slides,
+   so it's obvious where one functionality ends and the next begins. */
+.view-title {
+  text-align: center;
+  margin: 4px 0 6px;
+  border-top: 3px dashed var(--ink);
+  padding-top: 20px;
+}
 .view-sub { text-align: center; opacity: .8; margin-bottom: 26px; }
 
 /* ---------- cards ---------- */
