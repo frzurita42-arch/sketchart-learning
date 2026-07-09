@@ -1155,14 +1155,36 @@ function showSlide(slide) {
     btn.addEventListener('click', () => answer(parseInt(btn.dataset.i, 10))));
 }
 
+function summarizeSlideVisuals(slide) {
+  const comps = Array.isArray(slide?.components) ? slide.components : [];
+  const toText = (v) => String(v || '').trim();
+  return comps
+    .filter(c => ['table', 'svg', 'image', 'latex', 'code'].includes(c?.type))
+    .map((c) => {
+      if (c.type === 'table') {
+        const headers = Array.isArray(c.headers) ? c.headers.join(' | ') : '';
+        const firstRow = Array.isArray(c.rows) && c.rows[0] ? c.rows[0].join(' | ') : '';
+        return `table:${toText(headers)}::${toText(firstRow)}`.slice(0, 180);
+      }
+      if (c.type === 'svg') return `svg:${toText(c.caption)}`.slice(0, 180);
+      if (c.type === 'image') return `image:${toText(c.caption || c.prompt || c.alt)}`.slice(0, 180);
+      if (c.type === 'latex') return `latex:${toText(c.caption || c.content)}`.slice(0, 180);
+      if (c.type === 'code') return `code:${toText(c.language)}:${toText(c.content).split('\n')[0]}`.slice(0, 180);
+      return '';
+    })
+    .filter(Boolean);
+}
+
 function branchFor(slide, option) {
+  const visualRefs = summarizeSlideVisuals(slide);
   return {
     chosenText: option.text,
     correct: !!option.correct,
     misconception: option.misconception || '',
     historyEntry: {
       title: slide.title, summary: slide.summary,
-      question: slide.quiz.question, chosen: option.text, correct: !!option.correct
+      question: slide.quiz.question, chosen: option.text, correct: !!option.correct,
+      visualRefs
     }
   };
 }

@@ -1163,20 +1163,21 @@ function makeFallbackSlide({ topic, concept, level, settings = {}, slideNumber, 
   ];
 
   if (isTimeTravel) {
-    components.push({
-      type: 'table',
-      headers: ['Dimension', 'Past', 'Present', 'Future'],
-      rows: [
-        ['Main pressure', 'Resource scarcity', 'Infrastructure strain', 'Interplanetary coordination'],
-        ['Decision lens', 'Stability first', 'Risk balancing', 'Long-horizon resilience'],
-        ['Best metric', 'Survival rate', 'Service reliability', 'Sustainable treaty compliance']
-      ],
-      caption: 'Time-travel comparison frame for the same systems problem'
-    });
-    if (slideNumber % 2 === 1) {
+    if (slideNumber % 2 === 0) {
+      components.push({
+        type: 'table',
+        headers: ['Dimension', 'Past', 'Present', 'Future'],
+        rows: [
+          ['Main pressure', 'Resource scarcity', 'Infrastructure strain', 'Interplanetary coordination'],
+          ['Decision lens', 'Stability first', 'Risk balancing', 'Long-horizon resilience'],
+          ['Best metric', 'Survival rate', 'Service reliability', `Treaty compliance (slide ${slideNumber})`]
+        ],
+        caption: `Time-travel comparison frame for slide ${slideNumber}`
+      });
+    } else {
       components.push({
         type: 'svg',
-        caption: 'Feedback loop from policy to infrastructure outcomes',
+        caption: `Feedback loop from policy to infrastructure outcomes (slide ${slideNumber})`,
         svg: `<svg viewBox="0 0 420 220" xmlns="http://www.w3.org/2000/svg"><rect x="16" y="18" width="120" height="48" rx="10" fill="#f7f3e9" stroke="#2d2a26" stroke-width="2.5"/><text x="28" y="48" font-size="14" fill="#2d2a26">Policy choice</text><rect x="150" y="18" width="120" height="48" rx="10" fill="#f7f3e9" stroke="#2d2a26" stroke-width="2.5"/><text x="170" y="48" font-size="14" fill="#2d2a26">Resource flow</text><rect x="284" y="18" width="120" height="48" rx="10" fill="#f7f3e9" stroke="#2d2a26" stroke-width="2.5"/><text x="300" y="48" font-size="14" fill="#2d2a26">System impact</text><path d="M136 42 L150 42" stroke="#2d2a26" stroke-width="2.5"/><path d="M270 42 L284 42" stroke="#2d2a26" stroke-width="2.5"/><path d="M344 66 C344 120, 74 120, 74 66" fill="none" stroke="#5c80bc" stroke-width="2.5"/><polygon points="69,70 74,58 79,70" fill="#5c80bc"/><rect x="92" y="132" width="238" height="62" rx="10" fill="#fffbe8" stroke="#2d2a26" stroke-width="2.5"/><text x="108" y="158" font-size="14" fill="#2d2a26">Review metric: reliability, fairness, sustainability</text><text x="108" y="178" font-size="14" fill="#2d2a26">Then adjust the next policy cycle</text></svg>`
       });
     }
@@ -1307,6 +1308,75 @@ function sanitizeComponents(components) {
     if (c.type === 'table') return Array.isArray(c.headers) && c.headers.length > 0 && Array.isArray(c.rows) && c.rows.length > 0;
     return true;
   });
+}
+
+function componentVisualSignature(component) {
+  if (!component || !component.type) return '';
+  const clean = (v) => String(v || '').trim().toLowerCase();
+  if (component.type === 'table') {
+    const headers = Array.isArray(component.headers) ? component.headers.join('|') : '';
+    const firstRow = Array.isArray(component.rows) && component.rows[0] ? component.rows[0].join('|') : '';
+    return `table:${clean(headers)}::${clean(firstRow)}`.slice(0, 220);
+  }
+  if (component.type === 'svg') return `svg:${clean(component.caption)}`.slice(0, 220);
+  if (component.type === 'image') return `image:${clean(component.caption || component.prompt || component.alt)}`.slice(0, 220);
+  if (component.type === 'latex') return `latex:${clean(component.caption || component.content)}`.slice(0, 220);
+  if (component.type === 'code') return `code:${clean(component.language)}:${clean(String(component.content || '').split('\n')[0])}`.slice(0, 220);
+  return '';
+}
+
+function enforceSlideVisualPolicy(slide, history = [], slideNumber = 1) {
+  const visualTypes = new Set(['table', 'svg', 'image', 'latex', 'code']);
+  const previous = new Set(
+    (Array.isArray(history) ? history : [])
+      .flatMap(h => Array.isArray(h?.visualRefs) ? h.visualRefs : [])
+      .map(v => String(v || '').trim().toLowerCase())
+      .filter(Boolean)
+  );
+
+  const components = Array.isArray(slide.components) ? slide.components : [];
+  const visualIndexes = components
+    .map((c, idx) => ({ c, idx, sig: componentVisualSignature(c) }))
+    .filter(x => visualTypes.has(x.c?.type));
+
+  if (visualIndexes.length > 1) {
+    const preferred = visualIndexes.find(v => v.sig && !previous.has(v.sig.toLowerCase())) || visualIndexes[0];
+    slide.components = components.filter((_, idx) => !visualIndexes.some(v => v.idx === idx) || idx === preferred.idx);
+  }
+
+  const oneVisual = (slide.components || []).find(c => visualTypes.has(c?.type));
+  if (!oneVisual) return;
+
+  const sig = componentVisualSignature(oneVisual).toLowerCase();
+  if (!sig || !previous.has(sig)) return;
+
+  // Ensure uniqueness when a repeated visual slips through by adjusting the component content.
+  if (oneVisual.type === 'table' && Array.isArray(oneVisual.rows)) {
+    oneVisual.rows.push([
+      `Slide ${slideNumber} focus`,
+      'New evidence',
+      'New constraint',
+      'Best choice for this question'
+    ].slice(0, Math.max(2, (oneVisual.headers || []).length || 4)));
+    if (!oneVisual.caption) oneVisual.caption = `Slide ${slideNumber} comparison table`;
+    return;
+  }
+  if (oneVisual.type === 'svg') {
+    oneVisual.caption = `${String(oneVisual.caption || 'Diagram').trim()} (slide ${slideNumber} view)`;
+    return;
+  }
+  if (oneVisual.type === 'image') {
+    oneVisual.caption = `${String(oneVisual.caption || 'Illustration').trim()} (slide ${slideNumber})`;
+    if (oneVisual.prompt) oneVisual.prompt = `${String(oneVisual.prompt).trim()} Emphasize slide ${slideNumber} specifics.`;
+    return;
+  }
+  if (oneVisual.type === 'latex') {
+    oneVisual.caption = `${String(oneVisual.caption || 'Formula').trim()} (slide ${slideNumber})`;
+    return;
+  }
+  if (oneVisual.type === 'code') {
+    oneVisual.content = `${String(oneVisual.content || '').trim()}\n// slide ${slideNumber} variant`;
+  }
 }
 
 // Generate one image. Prefers an OpenAI-compatible provider, else Gemini's image model.
@@ -1935,9 +2005,12 @@ Rules:
 - Exactly 4 quiz options, exactly ONE with "correct": true, shuffled position.
 - Make the quiz genuinely CHALLENGING, not obvious: every option must be on-topic and plausible to someone who only half-understood the slide. Never make the correct answer the conspicuously longest or most detailed, and never make wrong options absurd or off-topic. Each wrong option is a common, tempting mistake that reveals a DIFFERENT misconception. A careless reader should be able to fall for a distractor; only careful reasoning from the slide's paragraphs should yield the right answer.
 - LENGTH: the slide MUST contain exactly ${paraCount} distinct paragraph(s) of prose (as separate "text" components), each about ${paragraphWords} words. Do not collapse them, and do not pad — each paragraph carries new substance. ${densityRule}
+- VISUAL COUNT: include AT MOST ONE primary visual component on this slide from [table, svg, image, latex, code]. Never include more than one of these in the same slide.
 - COHESION: the paragraphs must build on one another in order — introduce the idea, develop it, then apply or consolidate it — never restating the same point. The slide must also connect to the previous slides (briefly recall or build on them) and set up what comes next, so the whole presentation reads as one continuous, complementary lesson rather than isolated cards.
- - VISUALS: pick the visual that BEST fits this slide and make it ACCURATELY represent what the paragraphs say — never a generic or decorative figure (no meaningless Venn diagrams, plain squares, or random shapes). Choose from ${visualMenu}: use a LaTeX formula when the idea is mathematical, a code snippet (with the correct language) when it is about programming/algorithms/data, ${imageEnabled ? 'and a generated image when a rich pictorial or real-world depiction helps understanding. ' : ''}${allowModelSvg ? 'and a labelled svg diagram when the idea is a structure, process, or relationship. ' : ''}Vary the visual type across consecutive slides, and you may combine two (e.g. a formula AND an image). Prefer inline $...$ math inside paragraphs wherever a symbol or equation is mentioned.
+- VISUALS: pick the visual that BEST fits this slide and make it ACCURATELY represent what the paragraphs say — never a generic or decorative figure (no meaningless Venn diagrams, plain squares, or random shapes). Choose from ${visualMenu}: use a LaTeX formula when the idea is mathematical, a code snippet (with the correct language) when it is about programming/algorithms/data, ${imageEnabled ? 'and a generated image when a rich pictorial or real-world depiction helps understanding. ' : ''}${allowModelSvg ? 'and a labelled svg diagram when the idea is a structure, process, or relationship. ' : ''}Vary the visual type across consecutive slides and keep exactly one primary visual component.
 - TABLES: when using a table, keep it compact (3-6 rows, 2-6 columns), label headers clearly, and ensure every row directly supports the slide's teaching point.
+- UNIQUENESS: do not reuse the same visual from previous slides in this activity. Create a new visual tailored to THIS slide only.
+- QUIZ ALIGNMENT: the visual must directly help answer this slide's multiple-choice question or explain one likely misconception.
 - If a code snippet is included: ${codeDepth} Include clear inline comments that explain non-obvious lines and decisions.
 - If a LaTeX formula/proof block is included: ${equationDepth} Follow it with explanatory text that walks through the symbols and logic step-by-step.
 - Any formula/proof/code explanation should be as substantial as the selected paragraph length setting; avoid tiny token examples for long-form settings.
@@ -1947,6 +2020,11 @@ Rules:
       ? 'This is a Time Travel activity slide: include ONE table component that compares scenarios across periods (past/present/future or equivalent timeline stages), plus one additional visual aid (svg/image/latex/code as appropriate).'
       : 'This is a Time Travel activity slide: include at least ONE strong visual aid (svg/image/table/latex/code) that makes the timeline dynamics explicit and practical.')
     : 'For non-time-travel activities, include tables only when they add clear explanatory value.'}
+- ${isTimeTravelActivity
+    ? (shouldUseTableThisSlide
+      ? 'For this Time Travel slide, the ONE primary visual should be a timeline comparison table specific to this slide question.'
+      : 'For this Time Travel slide, the ONE primary visual should be a non-table visual (svg/image/latex/code) specific to this slide question.')
+    : 'For other activities, choose one visual that best supports this slide and keep it unique vs prior slides.'}
 - Tone/sentiment of all writing: ${settings.tone || 'friendly lecture'}. Complexity of language: ${settings.complexity || 'standard'}. Audience level: ${level}.
 ${settings.language ? `- Write ALL text (including quiz and explanations) in ${settings.language}.\n` : ''}${settings.audience ? `- The reader is: ${settings.audience}. Pitch every explanation to them.\n` : ''}${settings.customInstructions ? `- Extra author instructions from the learner (follow them where they don't conflict with the schema): ${settings.customInstructions}\n` : ''}
 - The ${paraCount} substantive paragraph(s) are required every time, alongside the chosen visual(s).
@@ -1954,7 +2032,7 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
 
   const historyText = history.length
     ? 'Slides so far:\n' + history.map((h, i) =>
-        `${i + 1}. "${h.title}" — ${h.summary} (quiz: "${h.question}" → learner chose "${h.chosen}", ${h.correct ? 'CORRECT' : 'WRONG'})`).join('\n')
+        `${i + 1}. "${h.title}" — ${h.summary} (quiz: "${h.question}" → learner chose "${h.chosen}", ${h.correct ? 'CORRECT' : 'WRONG'}). Visuals used: ${Array.isArray(h.visualRefs) && h.visualRefs.length ? h.visualRefs.join(' || ') : 'none'}`).join('\n')
     : 'This is the first slide.';
 
   let branchText = '';
@@ -1992,10 +2070,11 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
     // (unless the learner chose text-only). No-op without an Anthropic key.
     if (settings.imageDensity === 'text-only') {
       // enforce text-only regardless of what the model emitted
-      slide.components = slide.components.filter(c => !['svg', 'image', 'latex', 'code'].includes(c.type));
+      slide.components = slide.components.filter(c => !['svg', 'image', 'latex', 'code', 'table'].includes(c.type));
     } else {
       await illustrateWithClaude(slide, { topic, concept, level, history });
     }
+    enforceSlideVisualPolicy(slide, history, slideNumber);
     if (!slide.quiz || !Array.isArray(slide.quiz.options) || !slide.quiz.options.some(o => o.correct)) {
       throw new Error('Model returned a slide without a valid quiz, please retry');
     }
