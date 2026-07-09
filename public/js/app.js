@@ -113,7 +113,7 @@ function viewHome() {
   $app.innerHTML = `
     <h1 class="view-title">What do you want to <span class="scribble-underline">learn</span> today?</h1>
     <p class="view-sub">Pick a subject, or write your own.</p>
-    <div style="max-width:560px;margin:18px auto 0">
+    <div style="max-width:760px;margin:18px auto 0">
       <h4 style="margin:0 0 6px;opacity:.9">Start a Learning path</h4>
     </div>
     <div style="max-width:860px;margin:14px auto 0">
@@ -163,7 +163,7 @@ function viewHomeWithCurrentTopics() {
   $app.innerHTML = `
     <h1 class="view-title">What do you want to <span class="scribble-underline">learn</span> today?</h1>
     <p class="view-sub">Pick a subject, or write your own.</p>
-    <div style="max-width:560px;margin:18px auto 0">
+    <div style="max-width:760px;margin:18px auto 0">
       <h4 style="margin:0 0 6px;opacity:.9">Start a Learning path</h4>
     </div>
     <div style="max-width:860px;margin:14px auto 0">
