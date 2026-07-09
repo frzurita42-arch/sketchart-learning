@@ -189,12 +189,13 @@ label.field > span { display: block; margin-bottom: 4px; }
 
 /* ---------- LaTeX formula card ---------- */
 .comp-latex {
-  text-align: center; overflow-x: auto;
+  text-align: left; overflow-x: auto;
   border: 2px dashed var(--ink); border-radius: var(--wobble);
-  padding: 14px 16px; background: #fffdf6;
+  padding: 16px 18px; background: #fffdf6;
 }
-.comp-latex .katex { font-size: 1.25em; }
-.comp-latex figcaption { font-size: .9rem; opacity: .75; margin-top: 6px; }
+.comp-latex .katex { font-size: 1.15em; }
+.comp-latex .katex-display { margin: .15em 0 .35em; text-align: left; }
+.comp-latex figcaption { font-size: .9rem; opacity: .75; margin-top: 8px; text-align: left; }
 
 /* ---------- code snippet box ---------- */
 .comp-code {

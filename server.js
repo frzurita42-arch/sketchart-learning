@@ -1160,9 +1160,13 @@ function makeFallbackSlide({ topic, concept, level, settings = {}, slideNumber, 
 
   const isTimeTravel = /time\s*travel|\bfuture\b|\bpast\b|\bpresent\b|headline|news/i.test(`${topic} ${concept} ${settings.customInstructions || ''}`);
   const components = [
-    { type: 'text', content: `At ${level} level, this step focuses on ${concept}. The goal is to connect the idea to real choices, constraints, and outcomes, not just memorize definitions. Read each paragraph and look for cause-effect logic you can reuse in new situations. (${paragraphWords} style)` },
-    { type: 'text', content: `${adaptationLine} Use the topic context (${topic}) to ask: what changes, what stays stable, and what evidence would confirm your interpretation? This comparison mindset prevents shallow pattern matching and improves transfer to unfamiliar examples.` },
-    { type: 'text', content: `Before the next slide, summarize the concept in one sentence, then test it on a small scenario. If your explanation predicts outcomes and trade-offs, your understanding is likely solid; if not, revisit the key mechanism and assumptions.` }
+    { type: 'text', content: proofMode
+      ? `At ${level} level, this proof page builds the derivation for ${concept}. Read the comments on the right of each line; they explain why the step is valid and how the proof continues. (${paragraphWords} style)`
+      : `At ${level} level, this step focuses on ${concept}. The goal is to connect the idea to real choices, constraints, and outcomes, not just memorize definitions. Read each paragraph and look for cause-effect logic you can reuse in new situations. (${paragraphWords} style)` },
+    { type: 'text', content: proofMode
+      ? `${adaptationLine} Keep the proof in one continuous block, and use the learner's previous answer to either repair a missing step or deepen the derivation.`
+      : `${adaptationLine} Use the topic context (${topic}) to ask: what changes, what stays stable, and what evidence would confirm your interpretation? This comparison mindset prevents shallow pattern matching and improves transfer to unfamiliar examples.` },
+    ...(proofMode ? [] : [{ type: 'text', content: `Before the next slide, summarize the concept in one sentence, then test it on a small scenario. If your explanation predicts outcomes and trade-offs, your understanding is likely solid; if not, revisit the key mechanism and assumptions.` }])
   ];
 
   if (proofMode) {
@@ -1516,38 +1520,74 @@ function makeFallbackTable(slide, context = {}) {
 function makeFallbackProofLatex({ topic = '', concept = '', slideNumber = 1, branch = null } = {}) {
   const text = `${topic} ${concept}`.toLowerCase();
   const correction = branch?.correct
-    ? '\\text{Continue the derivation from the previous line.}'
-    : '\\text{Correct the missing step before continuing.}';
+    ? '\\text{continue from the previous line}'
+    : '\\text{repair the missing step}';
+  const tailComment = branch?.correct
+    ? '\\text{then deepen the result}'
+    : '\\text{then resume the derivation}';
 
   if (/taylor/.test(text)) {
     if (slideNumber <= 1) {
       return String.raw`\begin{aligned}
-f(x) &= P_n(x) + R_n(x) \\
-P_n(x) &= \sum_{k=0}^{n}\frac{f^{(k)}(a)}{k!}(x-a)^k \\
-${correction}
+f(x) &= P_n(x) + R_n(x) && \text{split into approximation + remainder} \\
+P_n(x) &= \sum_{k=0}^{n}\frac{f^{(k)}(a)}{k!}(x-a)^k && \text{Taylor polynomial around } a \\
+R_n(x) &= f(x) - P_n(x) && ${correction} \\
+&= \frac{f^{(n+1)}(\xi)}{(n+1)!}(x-a)^{n+1} && ${tailComment}
 \end{aligned}`;
     }
     return String.raw`\begin{aligned}
-R_n(x) &= f(x) - P_n(x) \\
-&= f(x) - \sum_{k=0}^{n}\frac{f^{(k)}(a)}{k!}(x-a)^k \\
-&= \frac{f^{(n+1)}(\xi)}{(n+1)!}(x-a)^{n+1}, \quad \xi \in (a,x) \\
-${correction}
+R_n(x) &= f(x) - P_n(x) && \text{isolate the remainder} \\
+&= f(x) - \sum_{k=0}^{n}\frac{f^{(k)}(a)}{k!}(x-a)^k && \text{substitute the polynomial} \\
+&= \frac{f^{(n+1)}(\xi)}{(n+1)!}(x-a)^{n+1}, \quad \xi \in (a,x) && ${correction} \\
+&\text{This remainder controls the error size.} && ${tailComment}
 \end{aligned}`;
   }
 
   if (/bayes|diagnostic|test/.test(text)) {
     return String.raw`\begin{aligned}
-P(H\mid E) &= \frac{P(E\mid H)P(H)}{P(E)} \\
-P(E) &= P(E\mid H)P(H) + P(E\mid \neg H)P(\neg H) \\
-${correction}
+P(H\mid E) &= \frac{P(E\mid H)P(H)}{P(E)} && \text{update belief from evidence} \\
+P(E) &= P(E\mid H)P(H) + P(E\mid \neg H)P(\neg H) && \text{normalize by all cases} \\
+${correction} && ${tailComment}
+\end{aligned}`;
+  }
+
+  if (/derivative|integral|calculus|series|limit|function|approximation/.test(text)) {
+    return String.raw`\begin{aligned}
+f'(x) &= \lim_{h\to 0}\frac{f(x+h)-f(x)}{h} && \text{start from the definition} \\
+&= \lim_{h\to 0}\Bigl(\frac{f(x+h)-f(x)}{h}\Bigr) && \text{same ratio, rewritten} \\
+&\text{Use algebra or expansion to simplify the numerator.} && ${tailComment}
+\end{aligned}`;
+  }
+
+  if (/matrix|vector|linear algebra|eigen|basis|dimension/.test(text)) {
+    return String.raw`\begin{aligned}
+A\mathbf{x} &= \lambda\mathbf{x} && \text{eigenvector relation} \\
+(A-\lambda I)\mathbf{x} &= \mathbf{0} && \text{move everything to one side} \\
+\det(A-\lambda I) &= 0 && \text{solve for the allowed } \lambda
+\end{aligned}`;
+  }
+
+  if (/probability|statistics|random|variance|expectation|distribution/.test(text)) {
+    return String.raw`\begin{aligned}
+\mathbb{E}[X] &= \sum_x x\,P(X=x) && \text{weighted average of outcomes} \\
+\mathrm{Var}(X) &= \mathbb{E}[(X-\mu)^2] && \text{spread around the mean} \\
+	ext{If needed, expand the square and collect terms.} && ${tailComment}
+\end{aligned}`;
+  }
+
+  if (/physics|force|energy|momentum|motion|wave|electric|field/.test(text)) {
+    return String.raw`\begin{aligned}
+F &= ma && \text{Newton's second law} \\
+a &= \frac{\Delta v}{\Delta t} && \text{acceleration from velocity change} \\
+	ext{Combine the relation with the problem's givens.} && ${tailComment}
 \end{aligned}`;
   }
 
   return String.raw`\begin{aligned}
-	ext{Claim: } & ${String(concept || topic || 'the result')} \\
-	ext{Step 1: } & \text{state assumptions and definitions} \\
-	ext{Step 2: } & \text{derive the key relation} \\
-${correction}
+	ext{Claim: } & ${String(concept || topic || 'the result')} && \text{state the goal} \\
+	ext{Step 1: } & \text{state assumptions and definitions} && \text{set the starting point} \\
+	ext{Step 2: } & \text{derive the key relation} && ${correction} \\
+	ext{Step 3: } & \text{conclude the proof} && ${tailComment}
 \end{aligned}`;
 }
 
@@ -2256,8 +2296,11 @@ Rules:
 - TABLE FORMAT: when a table appears, use exactly two columns labeled "Main idea" and "Different perspective"; each row should contrast the core point with a useful alternate angle or correction.
 - If a code snippet is included: ${codeDepth} Include clear inline comments that explain non-obvious lines and decisions.
 - If a LaTeX formula/proof block is included: ${equationDepth} Follow it with explanatory text that walks through the symbols and logic step-by-step.
+- If a LaTeX formula/proof block is included: ${equationDepth} Put the whole proof on the same slide in one displayed block when possible. Use short comments on the right of each line with aligned LaTeX, not separate captions or paragraphs that compete with the formula.
+- If a LaTeX formula/proof block is included: ${equationDepth} Put the whole proof on the same slide in one displayed block when possible. Use short comments on the right of each line with aligned LaTeX, not separate captions or paragraphs that compete with the formula.
+- If the concept is mathematical or another topic where symbols clarify the reasoning, prefer a displayed LaTeX derivation even if the example is not explicitly a formal proof.
 - Any formula/proof/code explanation should be as substantial as the selected paragraph length setting; avoid tiny token examples for long-form settings.
-- ${stemFocus ? `${stemAlternation} For this STEM-heavy concept, include either a code snippet or a LaTeX formula/proof block, plus textual explanation tying them together.` : 'Use STEM-style formula/code components only when they naturally fit the concept.'}
+- ${stemFocus ? `${stemAlternation} For this STEM-heavy concept, include either a code snippet or a LaTeX formula/proof block, plus textual explanation tying them together. If the topic naturally benefits from symbolic math, prefer a proof/derivation page.` : 'Use STEM-style formula/code components only when they naturally fit the concept.'}
 - ${proofMode ? 'PROOF MODE: every slide must contain at least one displayed LaTeX proof or derivation block. Do not summarize the proof in prose only. Continue the derivation from the previous slide, and if the learner was wrong, repair the missing step explicitly.' : ''}
 - ${isTimeTravelActivity
   ? 'This is a Time Travel activity slide: keep the explanation timeline-aware and use a table only if it genuinely clarifies the progression.'
