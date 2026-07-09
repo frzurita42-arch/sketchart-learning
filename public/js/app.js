@@ -365,12 +365,12 @@ function renderTimeTravelActivitySection() {
               </select></label>
             <label class="field"><span>Paragraphs per slide</span>
               <input type="number" id="tt-paragraph-count" min="1" max="7" value="${Math.min(7, Math.max(1, parseInt(tt.paragraphCount, 10) || 3))}" /></label>
-            <label class="field"><span>Image to text ratio</span>
+            <label class="field"><span>Support material ratio</span>
               <select id="tt-density">
                 <option value="text-only" ${tt.imageDensity === 'text-only' ? 'selected' : ''}>Text only</option>
                 <option value="mostly-text" ${tt.imageDensity === 'mostly-text' ? 'selected' : ''}>Mostly text</option>
                 <option value="balanced" ${tt.imageDensity === 'balanced' ? 'selected' : ''}>Balanced</option>
-                <option value="mostly-visual" ${tt.imageDensity === 'mostly-visual' ? 'selected' : ''}>Mostly visual</option>
+                <option value="mostly-visual" ${tt.imageDensity === 'mostly-visual' ? 'selected' : ''}>Mostly support material</option>
               </select></label>
             <label class="field"><span>Slides</span>
               <input type="number" id="tt-slides" min="2" max="20" value="${Math.min(20, Math.max(2, parseInt(tt.totalSlides, 10) || 7))}" /></label>
@@ -426,12 +426,12 @@ function renderStructuredExplanationsSection() {
                 <option value="medium" ${ml.paragraphLength === 'medium' ? 'selected' : ''}>Medium</option>
                 <option value="detailed" ${ml.paragraphLength === 'detailed' ? 'selected' : ''}>Detailed</option>
               </select></label>
-            <label class="field"><span>Image / text ratio</span>
+            <label class="field"><span>Support material ratio</span>
               <select id="ml-density">
                 <option value="text-only" ${ml.imageDensity === 'text-only' ? 'selected' : ''}>Text only</option>
                 <option value="mostly-text" ${ml.imageDensity === 'mostly-text' ? 'selected' : ''}>Mostly text</option>
                 <option value="balanced" ${ml.imageDensity === 'balanced' ? 'selected' : ''}>Balanced</option>
-                <option value="mostly-visual" ${ml.imageDensity === 'mostly-visual' ? 'selected' : ''}>Mostly visual</option>
+                <option value="mostly-visual" ${ml.imageDensity === 'mostly-visual' ? 'selected' : ''}>Mostly support material</option>
               </select></label>
             <label class="field"><span>Continuation style</span>
               <select id="ml-continuation">
