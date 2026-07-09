@@ -1416,6 +1416,67 @@ function enforceSlideVisualPolicy(slide, history = [], slideNumber = 1) {
   }
 }
 
+function inferTimeEraHint(text = '') {
+  const t = String(text || '').toLowerCase();
+  if (/future|futur|2050|2060|2070|2080|2090|2100|tomorrow|next decade|next century/.test(t)) return 'future';
+  if (/past|ancient|medieval|renaissance|victorian|historical|century ago|1800|1900|retro|old city/.test(t)) return 'past';
+  if (/present|today|current|modern|now|contemporary/.test(t)) return 'present';
+  return 'present';
+}
+
+function buildTimeTravelImagePrompt(slide, context = {}) {
+  const texts = (Array.isArray(slide?.components) ? slide.components : [])
+    .filter(c => c?.type === 'text')
+    .map(c => String(c.content || '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .slice(0, 2);
+  const narrative = [
+    String(slide?.title || '').trim(),
+    String(slide?.summary || '').trim(),
+    String(slide?.quiz?.question || '').trim(),
+    ...texts
+  ].filter(Boolean).join(' ');
+
+  const era = inferTimeEraHint(`${context.topic || ''} ${context.concept || ''} ${narrative} ${context.customInstructions || ''}`);
+  const eraDirection = era === 'future'
+    ? 'FUTURE setting: use plausible futuristic architecture, transport, clothing, interfaces, and infrastructure.'
+    : era === 'past'
+      ? 'PAST setting: use historically accurate architecture, materials, clothing, tools, transport, and signage.'
+      : 'PRESENT setting: use realistic current-day architecture, technology, transport, and public spaces.';
+
+  return [
+    'NANO BANANA style educational illustration for a Time Travel learning slide.',
+    `Topic: ${context.topic || ''}. Concept: ${context.concept || ''}.`,
+    `Slide focus: ${narrative.slice(0, 700)}`,
+    eraDirection,
+    'The scene must directly visualize the concept in this story and support answering the slide quiz.',
+    'No anachronisms: all visual details must match the selected time period accurately.',
+    'Cinematic but classroom-safe, clear composition, high detail, no text overlays, no logos.'
+  ].join(' ');
+}
+
+function enforceTimeTravelImagePolicy(slide, context = {}) {
+  if (!slide || !Array.isArray(slide.components)) return;
+  const visualTypes = new Set(['table', 'svg', 'image', 'latex', 'code']);
+  const imagePrompt = buildTimeTravelImagePrompt(slide, context);
+  const nonVisual = slide.components.filter(c => !visualTypes.has(c?.type));
+  const imageComp = {
+    type: 'image',
+    prompt: imagePrompt,
+    frame: context.slideNumber % 2 === 0 ? 'polaroid' : 'paper',
+    caption: `${String((inferTimeEraHint(imagePrompt) || 'present')).toUpperCase()} scene: ${String(slide.title || context.concept || 'Time Travel concept').trim()}`
+  };
+
+  // Keep exactly one primary visual for Time Travel: the generated image.
+  const firstTextIdx = nonVisual.findIndex(c => c?.type === 'text');
+  if (firstTextIdx >= 0) {
+    nonVisual.splice(firstTextIdx + 1, 0, imageComp);
+  } else {
+    nonVisual.unshift(imageComp);
+  }
+  slide.components = nonVisual;
+}
+
 // Generate one image. Prefers an OpenAI-compatible provider, else Gemini's image model.
 async function generateImage(prompt) {
   if (IMAGE_API_KEY) {
@@ -2000,7 +2061,7 @@ app.post('/api/ai/slide', auth, async (req, res) => {
       ? 'a LaTeX formula, a code snippet, a compact table, or a labelled svg diagram'
       : 'a LaTeX formula, a code snippet, or a compact table');
   const isTimeTravelActivity = /time\s*travel|\bfuture\b|\bpast\b|\bpresent\b|headline|news/i.test(`${topic} ${concept} ${settings.customInstructions || ''}`);
-  const shouldUseTableThisSlide = isTimeTravelActivity && slideNumber % 2 === 0;
+  const canGenerateImage = imageEnabled || geminiEnabled;
   const stemFocus = /math|physics|program|algorithm|computer|data|statistics|calculus|algebra|geometry|numerical|machine learning|ai|engineering|cryptography|proof|equation|formula|theorem|derivative|integral|linear algebra|probability/i
     .test(`${topic} ${concept}`);
   const equationDepth = {
@@ -2053,14 +2114,14 @@ Rules:
 - Any formula/proof/code explanation should be as substantial as the selected paragraph length setting; avoid tiny token examples for long-form settings.
 - ${stemFocus ? `${stemAlternation} For this STEM-heavy concept, include both: (1) a visual component (image/svg when available) and (2) either a code snippet or a LaTeX formula/proof block, plus textual explanation tying them together.` : 'Use STEM-style formula/code components only when they naturally fit the concept.'}
 - ${isTimeTravelActivity
-    ? (shouldUseTableThisSlide
-      ? 'This is a Time Travel activity slide: include ONE table component that compares scenarios across periods (past/present/future or equivalent timeline stages), plus one additional visual aid (svg/image/latex/code as appropriate).'
-      : 'This is a Time Travel activity slide: include at least ONE strong visual aid (svg/image/table/latex/code) that makes the timeline dynamics explicit and practical.')
+    ? (canGenerateImage
+      ? 'This is a Time Travel activity slide: include ONE generated image as the primary visual. The image must depict the concept in a time-accurate setting (past/present/future) with concrete details (architecture, transport, tools, clothing, environment).'
+      : 'This is a Time Travel activity slide: include at least ONE strong visual aid (svg/table/latex/code) that makes the timeline dynamics explicit and practical.')
     : 'For non-time-travel activities, include tables only when they add clear explanatory value.'}
 - ${isTimeTravelActivity
-    ? (shouldUseTableThisSlide
-      ? 'For this Time Travel slide, the ONE primary visual should be a timeline comparison table specific to this slide question.'
-      : 'For this Time Travel slide, the ONE primary visual should be a non-table visual (svg/image/latex/code) specific to this slide question.')
+    ? (canGenerateImage
+      ? 'For this Time Travel slide, the ONE primary visual MUST be an image prompt suitable for generation, unique versus previous slides.'
+      : 'For this Time Travel slide, the ONE primary visual should be a non-image visual specific to this slide question.')
     : 'For other activities, choose one visual that best supports this slide and keep it unique vs prior slides.'}
 - Tone/sentiment of all writing: ${settings.tone || 'friendly lecture'}. Complexity of language: ${settings.complexity || 'standard'}. Audience level: ${level}.
 ${settings.language ? `- Write ALL text (including quiz and explanations) in ${settings.language}.\n` : ''}${settings.audience ? `- The reader is: ${settings.audience}. Pitch every explanation to them.\n` : ''}${settings.customInstructions ? `- Extra author instructions from the learner (follow them where they don't conflict with the schema): ${settings.customInstructions}\n` : ''}
@@ -2102,6 +2163,15 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
   try {
     const slide = await generateStructured([{ role: 'system', content: system }, { role: 'user', content: user }], { temperature: 0.85, maxTokens: 8192 });
     slide.components = sanitizeComponents(slide.components);
+    if (isTimeTravelActivity && settings.imageDensity !== 'text-only' && canGenerateImage) {
+      enforceTimeTravelImagePolicy(slide, {
+        topic,
+        concept,
+        slideNumber,
+        totalSlides,
+        customInstructions: settings.customInstructions || ''
+      });
+    }
     slide.components = await fillImages(slide.components); // generate any requested images (no-op without an image key)
     // Have Claude draw this slide's diagram, contextual to concept/level/progress
     // (unless the learner chose text-only). No-op without an Anthropic key.
