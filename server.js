@@ -2226,7 +2226,10 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
       // enforce text-only regardless of what the model emitted
       slide.components = slide.components.filter(c => !['svg', 'image', 'latex', 'code', 'table'].includes(c.type));
     } else {
-      await illustrateWithClaude(slide, { topic, concept, level, history });
+      // Time Travel now uses generated images as the primary visual; do not replace with SVG.
+      if (!isTimeTravelActivity) {
+        await illustrateWithClaude(slide, { topic, concept, level, history });
+      }
     }
     enforceSlideVisualPolicy(slide, history, slideNumber);
     if (!slide.quiz || !Array.isArray(slide.quiz.options) || !slide.quiz.options.some(o => o.correct)) {
