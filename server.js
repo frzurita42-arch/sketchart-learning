@@ -3,6 +3,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { Pool } = require('pg');
 
 // ---------- tiny .env loader (no dependency needed) ----------
 const envPath = path.join(__dirname, '.env');
@@ -16,6 +17,7 @@ if (fs.existsSync(envPath)) {
 const PORT = process.env.PORT || 3000;
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 const DEEPSEEK_URL = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/chat/completions';
+const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
 const DATA_DIR = path.join(__dirname, 'data');
 const GEN_DIR = path.join(DATA_DIR, 'generated');
 const SUGGESTED_STORE_FILE = 'suggested_topics.json';
@@ -81,6 +83,75 @@ function hasConfiguredKey(value) {
   return !/(your[-_ ]?key|sk-your-key-here|replace-me|placeholder)/i.test(v);
 }
 
+const dbEnabled = hasConfiguredKey(DATABASE_URL);
+const pgPool = dbEnabled
+  ? new Pool({
+      connectionString: DATABASE_URL,
+      ssl: /localhost|127\.0\.0\.1/.test(DATABASE_URL) ? false : { rejectUnauthorized: false }
+    })
+  : null;
+
+async function dbQuery(text, params = []) {
+  if (!pgPool) throw new Error('Database is not configured');
+  return pgPool.query(text, params);
+}
+
+async function initDatabase() {
+  if (!pgPool) return;
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS users (
+      username TEXT PRIMARY KEY,
+      salt TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS games (
+      id TEXT PRIMARY KEY,
+      share_id TEXT UNIQUE NOT NULL,
+      share_url TEXT,
+      username TEXT NOT NULL REFERENCES users(username) ON DELETE CASCADE,
+      finished_at TIMESTAMPTZ NOT NULL,
+      finished_date TEXT,
+      finished_time TEXT,
+      topic TEXT,
+      concept TEXT,
+      level TEXT,
+      settings JSONB,
+      slides JSONB,
+      correct INTEGER,
+      total INTEGER,
+      duration_sec INTEGER,
+      recommendations JSONB,
+      question_summary JSONB,
+      answer_summary JSONB,
+      ai_notes JSONB
+    )
+  `);
+  await dbQuery('CREATE INDEX IF NOT EXISTS idx_games_username_finished_at ON games(username, finished_at DESC)');
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS suggested_topics_cache (
+      username TEXT PRIMARY KEY REFERENCES users(username) ON DELETE CASCADE,
+      pair JSONB NOT NULL,
+      cursor INTEGER NOT NULL DEFAULT 0,
+      last_shown_topic TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      trigger_topic TEXT
+    )
+  `);
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS home_topics_cache (
+      username TEXT PRIMARY KEY REFERENCES users(username) ON DELETE CASCADE,
+      topics JSONB NOT NULL,
+      cursor INTEGER NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      trigger_topic TEXT
+    )
+  `);
+}
+
 fs.mkdirSync(GEN_DIR, { recursive: true });
 
 function parseModelJson(raw) {
@@ -143,10 +214,176 @@ function writeJSON(file, data) {
   fs.writeFileSync(path.join(DATA_DIR, file), JSON.stringify(data, null, 2));
 }
 
-function recentUserGames(username, limit = 20) {
-  return readJSON('games.json', [])
-    .filter(g => g.username === username)
-    .slice(-limit);
+let users = readJSON('users.json', []);
+
+function normalizeStoreShape(store, defaults) {
+  const next = store && typeof store === 'object' ? store : {};
+  if (!Array.isArray(next.defaults) || !next.defaults.length) next.defaults = defaults;
+  if (!next.users || typeof next.users !== 'object') next.users = {};
+  return next;
+}
+
+async function loadUsers() {
+  if (!pgPool) {
+    return Array.isArray(users) ? users : [];
+  }
+  const { rows } = await dbQuery('SELECT username, salt, password_hash, role, created_at FROM users ORDER BY created_at ASC');
+  return rows.map(r => ({
+    username: r.username,
+    salt: r.salt,
+    passwordHash: r.password_hash,
+    role: r.role,
+    createdAt: new Date(r.created_at).toISOString()
+  }));
+}
+
+async function persistUsers(nextUsers) {
+  users = nextUsers;
+  if (!pgPool) {
+    writeJSON('users.json', nextUsers);
+    return;
+  }
+  const client = await pgPool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const u of nextUsers) {
+      await client.query(
+        `INSERT INTO users (username, salt, password_hash, role, created_at)
+         VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (username) DO UPDATE SET
+           salt = EXCLUDED.salt,
+           password_hash = EXCLUDED.password_hash,
+           role = EXCLUDED.role,
+           created_at = EXCLUDED.created_at`,
+        [u.username, u.salt, u.passwordHash, u.role, u.createdAt || new Date().toISOString()]
+      );
+    }
+    const usernames = nextUsers.map(u => u.username);
+    if (usernames.length) {
+      await client.query('DELETE FROM users WHERE username <> ALL($1::text[])', [usernames]);
+    } else {
+      await client.query('DELETE FROM users');
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+async function readGames() {
+  if (!pgPool) return readJSON('games.json', []);
+  const { rows } = await dbQuery('SELECT * FROM games ORDER BY finished_at ASC');
+  return rows.map(r => ({
+    id: r.id,
+    shareId: r.share_id,
+    shareUrl: r.share_url,
+    username: r.username,
+    finishedAt: new Date(r.finished_at).toISOString(),
+    finishedDate: r.finished_date,
+    finishedTime: r.finished_time,
+    topic: r.topic,
+    concept: r.concept,
+    level: r.level,
+    settings: r.settings,
+    slides: r.slides,
+    correct: r.correct,
+    total: r.total,
+    durationSec: r.duration_sec,
+    recommendations: r.recommendations,
+    questionSummary: r.question_summary,
+    answerSummary: r.answer_summary,
+    aiNotes: r.ai_notes
+  }));
+}
+
+async function insertGame(record) {
+  if (!pgPool) {
+    const games = readJSON('games.json', []);
+    games.push(record);
+    writeJSON('games.json', games);
+    return;
+  }
+  await dbQuery(
+    `INSERT INTO games (
+      id, share_id, share_url, username, finished_at, finished_date, finished_time,
+      topic, concept, level, settings, slides, correct, total, duration_sec,
+      recommendations, question_summary, answer_summary, ai_notes
+    ) VALUES (
+      $1,$2,$3,$4,$5,$6,$7,
+      $8,$9,$10,$11,$12,$13,$14,$15,
+      $16,$17,$18,$19
+    )`,
+    [
+      record.id,
+      record.shareId,
+      record.shareUrl,
+      record.username,
+      record.finishedAt,
+      record.finishedDate,
+      record.finishedTime,
+      record.topic,
+      record.concept,
+      record.level,
+      record.settings || null,
+      record.slides || null,
+      record.correct,
+      record.total,
+      record.durationSec,
+      record.recommendations || null,
+      record.questionSummary || null,
+      record.answerSummary || null,
+      record.aiNotes || null
+    ]
+  );
+}
+
+async function deleteGameRecord(gameId) {
+  if (!pgPool) {
+    const games = readJSON('games.json', []);
+    const before = games.length;
+    const next = games.filter(g => g.id !== gameId && g.shareId !== gameId);
+    if (next.length === before) return false;
+    writeJSON('games.json', next);
+    return true;
+  }
+  const { rowCount } = await dbQuery('DELETE FROM games WHERE id = $1 OR share_id = $1', [gameId]);
+  return rowCount > 0;
+}
+
+async function recentUserGames(username, limit = 20) {
+  if (!pgPool) {
+    return readJSON('games.json', [])
+      .filter(g => g.username === username)
+      .slice(-limit);
+  }
+  const { rows } = await dbQuery(
+    'SELECT * FROM games WHERE username = $1 ORDER BY finished_at DESC LIMIT $2',
+    [username, Math.max(1, parseInt(limit, 10) || 20)]
+  );
+  return rows.reverse().map(r => ({
+    id: r.id,
+    shareId: r.share_id,
+    shareUrl: r.share_url,
+    username: r.username,
+    finishedAt: new Date(r.finished_at).toISOString(),
+    finishedDate: r.finished_date,
+    finishedTime: r.finished_time,
+    topic: r.topic,
+    concept: r.concept,
+    level: r.level,
+    settings: r.settings,
+    slides: r.slides,
+    correct: r.correct,
+    total: r.total,
+    durationSec: r.duration_sec,
+    recommendations: r.recommendations,
+    questionSummary: r.question_summary,
+    answerSummary: r.answer_summary,
+    aiNotes: r.ai_notes
+  }));
 }
 
 function buildBaseUrl(req) {
@@ -163,30 +400,108 @@ function isValidSuggestion(item) {
   return !!(item && typeof item === 'object' && String(item.topic || '').trim());
 }
 
-function readSuggestedStore() {
+async function readSuggestedStore() {
   const fallback = { defaults: DEFAULT_SUGGESTION_PAIR, users: {} };
+  if (pgPool) {
+    const { rows } = await dbQuery('SELECT username, pair, cursor, last_shown_topic, updated_at, trigger_topic FROM suggested_topics_cache');
+    const usersMap = {};
+    for (const r of rows) {
+      usersMap[r.username] = {
+        pair: Array.isArray(r.pair) ? r.pair : DEFAULT_SUGGESTION_PAIR,
+        cursor: Number.isInteger(r.cursor) ? r.cursor : 0,
+        lastShownTopic: r.last_shown_topic || null,
+        updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : new Date().toISOString(),
+        triggerTopic: r.trigger_topic || null
+      };
+    }
+    return { defaults: DEFAULT_SUGGESTION_PAIR, users: usersMap };
+  }
   const store = readJSON(SUGGESTED_STORE_FILE, fallback);
-  if (!store || typeof store !== 'object') return fallback;
-  if (!Array.isArray(store.defaults) || !store.defaults.length) store.defaults = DEFAULT_SUGGESTION_PAIR;
-  if (!store.users || typeof store.users !== 'object') store.users = {};
-  return store;
+  return normalizeStoreShape(store, DEFAULT_SUGGESTION_PAIR);
 }
 
-function writeSuggestedStore(store) {
-  writeJSON(SUGGESTED_STORE_FILE, store);
+async function writeSuggestedStore(store) {
+  const normalized = normalizeStoreShape(store, DEFAULT_SUGGESTION_PAIR);
+  if (!pgPool) {
+    writeJSON(SUGGESTED_STORE_FILE, normalized);
+    return;
+  }
+  const client = await pgPool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM suggested_topics_cache');
+    for (const [username, entry] of Object.entries(normalized.users || {})) {
+      await client.query(
+        `INSERT INTO suggested_topics_cache (username, pair, cursor, last_shown_topic, updated_at, trigger_topic)
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        [
+          username,
+          JSON.stringify(Array.isArray(entry.pair) ? entry.pair : DEFAULT_SUGGESTION_PAIR),
+          Number.isInteger(entry.cursor) ? entry.cursor : 0,
+          entry.lastShownTopic || null,
+          entry.updatedAt || new Date().toISOString(),
+          entry.triggerTopic || null
+        ]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
-function readHomeTopicsStore() {
+async function readHomeTopicsStore() {
   const fallback = { defaults: DEFAULT_HOME_TOPIC_POOL, users: {} };
+  if (pgPool) {
+    const { rows } = await dbQuery('SELECT username, topics, cursor, updated_at, trigger_topic FROM home_topics_cache');
+    const usersMap = {};
+    for (const r of rows) {
+      usersMap[r.username] = {
+        topics: Array.isArray(r.topics) ? r.topics : DEFAULT_HOME_TOPIC_POOL,
+        cursor: Number.isInteger(r.cursor) ? r.cursor : 0,
+        updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : new Date().toISOString(),
+        triggerTopic: r.trigger_topic || null
+      };
+    }
+    return { defaults: DEFAULT_HOME_TOPIC_POOL, users: usersMap };
+  }
   const store = readJSON(HOME_TOPICS_STORE_FILE, fallback);
-  if (!store || typeof store !== 'object') return fallback;
-  if (!Array.isArray(store.defaults) || !store.defaults.length) store.defaults = DEFAULT_HOME_TOPIC_POOL;
-  if (!store.users || typeof store.users !== 'object') store.users = {};
-  return store;
+  return normalizeStoreShape(store, DEFAULT_HOME_TOPIC_POOL);
 }
 
-function writeHomeTopicsStore(store) {
-  writeJSON(HOME_TOPICS_STORE_FILE, store);
+async function writeHomeTopicsStore(store) {
+  const normalized = normalizeStoreShape(store, DEFAULT_HOME_TOPIC_POOL);
+  if (!pgPool) {
+    writeJSON(HOME_TOPICS_STORE_FILE, normalized);
+    return;
+  }
+  const client = await pgPool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM home_topics_cache');
+    for (const [username, entry] of Object.entries(normalized.users || {})) {
+      await client.query(
+        `INSERT INTO home_topics_cache (username, topics, cursor, updated_at, trigger_topic)
+         VALUES ($1,$2,$3,$4,$5)`,
+        [
+          username,
+          JSON.stringify(Array.isArray(entry.topics) ? entry.topics : DEFAULT_HOME_TOPIC_POOL),
+          Number.isInteger(entry.cursor) ? entry.cursor : 0,
+          entry.updatedAt || new Date().toISOString(),
+          entry.triggerTopic || null
+        ]
+      );
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
 }
 
 function normalizeTopicPool(list, fallbackPool) {
@@ -316,12 +631,6 @@ function makeUser(username, password, role) {
   const salt = crypto.randomBytes(16).toString('hex');
   return { username, salt, passwordHash: hashPassword(password, salt), role, createdAt: new Date().toISOString() };
 }
-let users = readJSON('users.json', null);
-if (!users) {
-  users = [makeUser('admin', '123456', 'admin')];
-  writeJSON('users.json', users);
-  console.log('Seeded default admin user (admin / 123456)');
-}
 
 // ---------- sessions (auth tokens, in memory) ----------
 const tokens = new Map(); // token -> username
@@ -358,13 +667,21 @@ const ANTHROPIC_API_URL = process.env.ANTHROPIC_API_URL || 'https://api.anthropi
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-opus-4-8';
 const claudeSvgEnabled = !!ANTHROPIC_API_KEY;
 
-function auth(req, res, next) {
-  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-  const username = tokens.get(token);
-  if (!username) return res.status(401).json({ error: 'Not signed in' });
-  req.user = users.find(u => u.username === username);
-  if (!req.user) return res.status(401).json({ error: 'Unknown user' });
-  next();
+async function auth(req, res, next) {
+  try {
+    const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const username = tokens.get(token);
+    if (!username) return res.status(401).json({ error: 'Not signed in' });
+    req.user = users.find(u => u.username === username) || null;
+    if (!req.user && pgPool) {
+      users = await loadUsers();
+      req.user = users.find(u => u.username === username) || null;
+    }
+    if (!req.user) return res.status(401).json({ error: 'Unknown user' });
+    next();
+  } catch (e) {
+    res.status(500).json({ error: 'Auth failed' });
+  }
 }
 function adminOnly(req, res, next) {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
@@ -372,8 +689,9 @@ function adminOnly(req, res, next) {
 }
 
 // ---------- auth endpoints ----------
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { username, password } = req.body || {};
+  if (pgPool) users = await loadUsers();
   const user = users.find(u => u.username === username);
   if (!user || hashPassword(password || '', user.salt) !== user.passwordHash) {
     return res.status(401).json({ error: 'Wrong username or password' });
@@ -394,8 +712,8 @@ app.get('/api/me', auth, (req, res) => {
 });
 
 // ---------- user management ----------
-app.get('/api/users', auth, adminOnly, (req, res) => {
-  const games = readJSON('games.json', []);
+app.get('/api/users', auth, adminOnly, async (req, res) => {
+  const games = await readGames();
   res.json(users.map(u => ({
     username: u.username,
     role: u.role,
@@ -404,16 +722,16 @@ app.get('/api/users', auth, adminOnly, (req, res) => {
   })));
 });
 
-app.post('/api/users', auth, adminOnly, (req, res) => {
+app.post('/api/users', auth, adminOnly, async (req, res) => {
   const { username, password, role } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
   if (users.some(u => u.username === username)) return res.status(409).json({ error: 'User already exists' });
   users.push(makeUser(username.trim(), password, role === 'admin' ? 'admin' : 'user'));
-  writeJSON('users.json', users);
+  await persistUsers(users);
   res.json({ ok: true });
 });
 
-app.post('/api/users/:username/password', auth, (req, res) => {
+app.post('/api/users/:username/password', auth, async (req, res) => {
   const { username } = req.params;
   const { password } = req.body || {};
   if (!password) return res.status(400).json({ error: 'Password required' });
@@ -424,23 +742,22 @@ app.post('/api/users/:username/password', auth, (req, res) => {
   if (!user) return res.status(404).json({ error: 'No such user' });
   user.salt = crypto.randomBytes(16).toString('hex');
   user.passwordHash = hashPassword(password, user.salt);
-  writeJSON('users.json', users);
+  await persistUsers(users);
   res.json({ ok: true });
 });
 
-app.delete('/api/users/:username', auth, adminOnly, (req, res) => {
+app.delete('/api/users/:username', auth, adminOnly, async (req, res) => {
   const { username } = req.params;
   if (username === req.user.username) return res.status(400).json({ error: 'Cannot delete yourself' });
   const before = users.length;
   users = users.filter(u => u.username !== username);
   if (users.length === before) return res.status(404).json({ error: 'No such user' });
-  writeJSON('users.json', users);
+  await persistUsers(users);
   res.json({ ok: true });
 });
 
 // ---------- game records ----------
-app.post('/api/games', auth, (req, res) => {
-  const games = readJSON('games.json', []);
+app.post('/api/games', auth, async (req, res) => {
   const shareId = String(req.body.shareId || crypto.randomUUID()).trim();
   const shareUrl = String(req.body.shareUrl || `${buildBaseUrl(req)}/report/${shareId}`).trim();
   const record = {
@@ -464,18 +781,17 @@ app.post('/api/games', auth, (req, res) => {
     answerSummary: req.body.answerSummary || null,
     aiNotes: req.body.aiNotes || null
   };
-  games.push(record);
-  writeJSON('games.json', games);
+  await insertGame(record);
   res.json({ ok: true, id: record.id, shareId: record.shareId, shareUrl: record.shareUrl, finishedAt: record.finishedAt });
 });
 
-app.get('/api/games', auth, (req, res) => {
-  const games = readJSON('games.json', []);
+app.get('/api/games', auth, async (req, res) => {
+  const games = await readGames();
   res.json(req.user.role === 'admin' ? games : games.filter(g => g.username === req.user.username));
 });
 
-app.get('/api/games/export.csv', auth, (req, res) => {
-  const games = readJSON('games.json', []);
+app.get('/api/games/export.csv', auth, async (req, res) => {
+  const games = await readGames();
   const mine = req.user.role === 'admin' ? games : games.filter(g => g.username === req.user.username);
   const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const rows = [['user', 'date', 'time', 'topic', 'concept', 'level', 'correct', 'total', 'score_pct', 'duration_sec', 'question_summary', 'answer_summary', 'ai_notes', 'share_url']];
@@ -502,17 +818,14 @@ app.get('/api/games/export.csv', auth, (req, res) => {
   res.send(rows.map(r => r.map(esc).join(',')).join('\n'));
 });
 
-app.delete('/api/games/:gameId', auth, adminOnly, (req, res) => {
-  const games = readJSON('games.json', []);
-  const before = games.length;
-  const next = games.filter(g => g.id !== req.params.gameId && g.shareId !== req.params.gameId);
-  if (next.length === before) return res.status(404).json({ error: 'No such game' });
-  writeJSON('games.json', next);
+app.delete('/api/games/:gameId', auth, adminOnly, async (req, res) => {
+  const deleted = await deleteGameRecord(req.params.gameId);
+  if (!deleted) return res.status(404).json({ error: 'No such game' });
   res.json({ ok: true });
 });
 
-app.get('/report/:shareId', (req, res) => {
-  const games = readJSON('games.json', []);
+app.get('/report/:shareId', async (req, res) => {
+  const games = await readGames();
   const game = games.find(g => g.shareId === req.params.shareId || g.id === req.params.shareId);
   if (!game) return res.status(404).send('<h1>Report not found</h1>');
 
@@ -903,7 +1216,7 @@ Include ONLY these levels, in this order: ${wanted.join(', ')}. Give 4-6 concret
 });
 
 async function generateHomeTopicPoolForUser(username, { avoid = [], triggerTopic = '', poolSize = 24 } = {}) {
-  const games = recentUserGames(username, 30);
+  const games = await recentUserGames(username, 30);
   const learned = [...new Set(games.map(g => `${g.topic} / ${g.concept}`).filter(Boolean))].slice(-20);
   const avoidList = Array.isArray(avoid) ? avoid.map(String).filter(Boolean).slice(0, 50) : [];
   const wantedPool = Math.min(36, Math.max(18, parseInt(poolSize, 10) || 24));
@@ -929,7 +1242,7 @@ Rules:
 }
 
 async function refreshHomeTopicPoolForUser(username, options = {}, store = null) {
-  const activeStore = store || readHomeTopicsStore();
+  const activeStore = store || await readHomeTopicsStore();
   const pool = await generateHomeTopicPoolForUser(username, options);
   const previous = activeStore.users[username] || {};
   activeStore.users[username] = {
@@ -938,7 +1251,7 @@ async function refreshHomeTopicPoolForUser(username, options = {}, store = null)
     updatedAt: new Date().toISOString(),
     triggerTopic: String(options.triggerTopic || '').trim() || null
   };
-  writeHomeTopicsStore(activeStore);
+  await writeHomeTopicsStore(activeStore);
   saveGeneration('home-topics', crypto.randomUUID(), { username, options, topics: pool, createdAt: new Date().toISOString() });
   return pool;
 }
@@ -956,7 +1269,7 @@ app.post('/api/ai/topics', auth, async (req, res) => {
   const { count = 12, avoid = [], refresh = false, triggerTopic = '' } = req.body || {};
   const wanted = Math.min(20, Math.max(6, parseInt(count, 10) || 12));
   const avoidSet = new Set((Array.isArray(avoid) ? avoid : []).map(v => String(v || '').trim().toLowerCase()).filter(Boolean));
-  const store = readHomeTopicsStore();
+  const store = await readHomeTopicsStore();
 
   if (refresh) {
     try {
@@ -965,7 +1278,7 @@ app.post('/api/ai/topics', auth, async (req, res) => {
       const rotated = rotatePickFromList(entry.topics || pool, wanted, avoidSet, Number.isInteger(entry.cursor) ? entry.cursor : 0);
       entry.cursor = rotated.nextCursor;
       store.users[req.user.username] = entry;
-      writeHomeTopicsStore(store);
+      await writeHomeTopicsStore(store);
       return res.json({ topics: rotated.items.map(name => ({ name, why: '' })), cached: false, poolUpdated: true });
     } catch {
       const rotated = rotatePickFromList(store.defaults || DEFAULT_HOME_TOPIC_POOL, wanted, avoidSet, 0);
@@ -984,7 +1297,7 @@ app.post('/api/ai/topics', auth, async (req, res) => {
       updatedAt: new Date().toISOString(),
       triggerTopic: null
     };
-    writeHomeTopicsStore(store);
+    await writeHomeTopicsStore(store);
     queueHomeTopicPoolRefresh(req.user.username, { avoid, triggerTopic, poolSize: 24 });
   }
 
@@ -992,7 +1305,7 @@ app.post('/api/ai/topics', auth, async (req, res) => {
   const rotated = rotatePickFromList(entry.topics || pool, wanted, avoidSet, Number.isInteger(entry.cursor) ? entry.cursor : 0);
   entry.cursor = rotated.nextCursor;
   store.users[req.user.username] = entry;
-  writeHomeTopicsStore(store);
+  await writeHomeTopicsStore(store);
   res.json({ topics: rotated.items.map(name => ({ name, why: '' })), cached: true, poolUpdated: false });
 });
 
@@ -1003,7 +1316,7 @@ app.post('/api/ai/topics/preload', auth, (req, res) => {
 });
 
 async function generateSuggestedPairForUser(username, { avoidTopics = [], triggerTopic = '' } = {}) {
-  const games = recentUserGames(username, 25);
+  const games = await recentUserGames(username, 25);
   const recent = games.slice(-12);
   const sameField = [...new Set(recent.map(g => String(g.topic || '').trim()).filter(Boolean))].slice(-8);
   const avoidSet = new Set((Array.isArray(avoidTopics) ? avoidTopics : []).map(v => String(v || '').trim().toLowerCase()).filter(Boolean));
@@ -1042,7 +1355,7 @@ Rules:
 }
 
 async function refreshSuggestedPairForUser(username, options = {}, store = null) {
-  const activeStore = store || readSuggestedStore();
+  const activeStore = store || await readSuggestedStore();
   const pair = await generateSuggestedPairForUser(username, options);
   const previous = activeStore.users[username] || {};
   activeStore.users[username] = {
@@ -1052,7 +1365,7 @@ async function refreshSuggestedPairForUser(username, options = {}, store = null)
     updatedAt: new Date().toISOString(),
     triggerTopic: String(options.triggerTopic || '').trim() || null
   };
-  writeSuggestedStore(activeStore);
+  await writeSuggestedStore(activeStore);
   saveGeneration('suggestions', crypto.randomUUID(), {
     username,
     options,
@@ -1074,7 +1387,7 @@ function queueSuggestedPairRefresh(username, options = {}) {
 app.post('/api/ai/suggested-topic', auth, async (req, res) => {
   const { avoidTopics = [], refresh = false, triggerTopic = '' } = req.body || {};
   const avoidSet = new Set((Array.isArray(avoidTopics) ? avoidTopics : []).map(v => String(v || '').trim().toLowerCase()).filter(Boolean));
-  const store = readSuggestedStore();
+  const store = await readSuggestedStore();
 
   if (refresh) {
     try {
@@ -1083,7 +1396,7 @@ app.post('/api/ai/suggested-topic', auth, async (req, res) => {
       const picked = randomPickSuggestionNoRepeat(entry.pair || pair, avoidSet, entry.lastShownTopic) || pair[0] || DEFAULT_SUGGESTION_PAIR[0];
       entry.lastShownTopic = picked.topic;
       store.users[req.user.username] = entry;
-      writeSuggestedStore(store);
+      await writeSuggestedStore(store);
       return res.json({ ...picked, cached: false, pairUpdated: true });
     } catch {
       const fallback = makeFallbackPair(avoidSet, triggerTopic)[0];
@@ -1107,7 +1420,7 @@ app.post('/api/ai/suggested-topic', auth, async (req, res) => {
       updatedAt: new Date().toISOString(),
       triggerTopic: null
     };
-    writeSuggestedStore(store);
+    await writeSuggestedStore(store);
     queueSuggestedPairRefresh(req.user.username, { avoidTopics, triggerTopic });
   }
 
@@ -1115,7 +1428,7 @@ app.post('/api/ai/suggested-topic', auth, async (req, res) => {
   const picked = randomPickSuggestionNoRepeat(entry.pair || activePair, avoidSet, entry.lastShownTopic) || activePair[0] || DEFAULT_SUGGESTION_PAIR[0];
   entry.lastShownTopic = picked.topic;
   store.users[req.user.username] = entry;
-  writeSuggestedStore(store);
+  await writeSuggestedStore(store);
   res.json({ ...picked, cached: true, pairUpdated: false });
 });
 
@@ -1156,7 +1469,7 @@ app.post('/api/ai/time-travel-headline', auth, async (req, res) => {
   };
 
   try {
-    const games = recentUserGames(req.user.username, 20);
+    const games = await recentUserGames(req.user.username, 20);
     const interests = [...new Set(games.map(g => `${g.topic} / ${g.concept}`).filter(Boolean))].slice(-10);
     const result = await generateStructured([
       {
@@ -1203,7 +1516,7 @@ app.post('/api/ai/structured-explanation-suggest', auth, async (req, res) => {
   };
 
   try {
-    const games = recentUserGames(req.user.username, 20);
+    const games = await recentUserGames(req.user.username, 20);
     const interests = [...new Set(games.map(g => `${g.topic} / ${g.concept}`).filter(Boolean))].slice(-12);
     const result = await generateStructured([
       {
@@ -1247,7 +1560,7 @@ app.post('/api/ai/path/level-refresh', auth, async (req, res) => {
   const { topic, level, count = 5, avoidConcepts = [], guidance } = req.body || {};
   if (!topic || !level) return res.status(400).json({ error: 'Topic and level are required' });
   const wanted = Math.min(8, Math.max(3, parseInt(count, 10) || 5));
-  const games = recentUserGames(req.user.username, 20);
+  const games = await recentUserGames(req.user.username, 20);
   const recent = games.map(g => `- ${g.topic} / ${g.concept} (${g.level}): ${g.correct}/${g.total}`).join('\n');
   const avoid = (Array.isArray(avoidConcepts) ? avoidConcepts : []).map(String).filter(Boolean).slice(0, 40);
 
@@ -1398,7 +1711,7 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
 // ---------- AI: end-of-game recommendations ----------
 app.post('/api/ai/recommend', auth, async (req, res) => {
   const { topic, concept, level, correct, total, durationSec, slides = [] } = req.body || {};
-  const history = recentUserGames(req.user.username, 12);
+  const history = await recentUserGames(req.user.username, 12);
   try {
     const result = await generateStructured([
       {
@@ -1460,12 +1773,104 @@ app.get(/^\/(?!api\/).*/, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.listen(PORT, () => {
-  console.log(`SketchLearn running on http://localhost:${PORT}`);
-  console.log(`Lesson text: ${geminiEnabled ? `Gemini (${GEMINI_TEXT_MODEL})${deepseekEnabled ? ' with DeepSeek failover' : ''}` : 'DeepSeek'}`);
-  const illus = claudeSvgEnabled ? `Claude SVG (${ANTHROPIC_MODEL})`
-    : (IMAGE_API_KEY ? `AI images (${IMAGE_API_MODEL})`
-      : (geminiEnabled ? `AI images (${GEMINI_IMAGE_MODEL})` : "the text model's own SVG"));
-  console.log(`Slide illustrations: ${illus}`);
-  if (!geminiEnabled && !deepseekEnabled) console.warn('WARNING: no text provider set — set GEMINI_API_KEY or DEEPSEEK_API_KEY in .env. AI features will fail.');
+async function bootstrapPersistence() {
+  if (!pgPool) {
+    if (!Array.isArray(users) || !users.length) {
+      users = [makeUser('admin', '123456', 'admin')];
+      writeJSON('users.json', users);
+      console.log('Seeded default admin user (admin / 123456)');
+    }
+    return;
+  }
+
+  await initDatabase();
+
+  let dbUsers = await loadUsers();
+  if (!dbUsers.length) {
+    const fileUsers = readJSON('users.json', []);
+    if (Array.isArray(fileUsers) && fileUsers.length) {
+      await persistUsers(fileUsers);
+      dbUsers = await loadUsers();
+      console.log(`Migrated ${fileUsers.length} user(s) from JSON to Postgres.`);
+    } else {
+      const seeded = [makeUser('admin', '123456', 'admin')];
+      await persistUsers(seeded);
+      dbUsers = seeded;
+      console.log('Seeded default admin user (admin / 123456) in Postgres');
+    }
+  }
+  users = dbUsers;
+
+  const gameCount = await dbQuery('SELECT COUNT(*)::int AS count FROM games');
+  const totalGames = gameCount.rows?.[0]?.count || 0;
+  if (!totalGames) {
+    const fileGames = readJSON('games.json', []);
+    let migratedGames = 0;
+    for (const g of Array.isArray(fileGames) ? fileGames : []) {
+      try {
+        await insertGame({
+          id: String(g.id || crypto.randomUUID()),
+          shareId: String(g.shareId || g.id || crypto.randomUUID()),
+          shareUrl: String(g.shareUrl || ''),
+          username: String(g.username || ''),
+          finishedAt: g.finishedAt || new Date().toISOString(),
+          finishedDate: g.finishedDate || '',
+          finishedTime: g.finishedTime || '',
+          topic: g.topic || '',
+          concept: g.concept || '',
+          level: g.level || '',
+          settings: g.settings || null,
+          slides: g.slides || null,
+          correct: Number.isFinite(g.correct) ? g.correct : 0,
+          total: Number.isFinite(g.total) ? g.total : 0,
+          durationSec: Number.isFinite(g.durationSec) ? g.durationSec : 0,
+          recommendations: g.recommendations || null,
+          questionSummary: g.questionSummary || null,
+          answerSummary: g.answerSummary || null,
+          aiNotes: g.aiNotes || null
+        });
+        migratedGames++;
+      } catch {
+        // Skip malformed records or records tied to unknown users.
+      }
+    }
+    if (migratedGames) console.log(`Migrated ${migratedGames} game record(s) from JSON to Postgres.`);
+  }
+
+  const suggestedCount = await dbQuery('SELECT COUNT(*)::int AS count FROM suggested_topics_cache');
+  if (!(suggestedCount.rows?.[0]?.count || 0)) {
+    const suggestedFile = normalizeStoreShape(
+      readJSON(SUGGESTED_STORE_FILE, { defaults: DEFAULT_SUGGESTION_PAIR, users: {} }),
+      DEFAULT_SUGGESTION_PAIR
+    );
+    if (Object.keys(suggestedFile.users || {}).length) await writeSuggestedStore(suggestedFile);
+  }
+
+  const homeCount = await dbQuery('SELECT COUNT(*)::int AS count FROM home_topics_cache');
+  if (!(homeCount.rows?.[0]?.count || 0)) {
+    const homeFile = normalizeStoreShape(
+      readJSON(HOME_TOPICS_STORE_FILE, { defaults: DEFAULT_HOME_TOPIC_POOL, users: {} }),
+      DEFAULT_HOME_TOPIC_POOL
+    );
+    if (Object.keys(homeFile.users || {}).length) await writeHomeTopicsStore(homeFile);
+  }
+}
+
+async function startServer() {
+  await bootstrapPersistence();
+  app.listen(PORT, () => {
+    console.log(`SketchLearn running on http://localhost:${PORT}`);
+    console.log(`Persistence: ${pgPool ? 'Postgres' : 'JSON files'}`);
+    console.log(`Lesson text: ${geminiEnabled ? `Gemini (${GEMINI_TEXT_MODEL})${deepseekEnabled ? ' with DeepSeek failover' : ''}` : 'DeepSeek'}`);
+    const illus = claudeSvgEnabled ? `Claude SVG (${ANTHROPIC_MODEL})`
+      : (IMAGE_API_KEY ? `AI images (${IMAGE_API_MODEL})`
+        : (geminiEnabled ? `AI images (${GEMINI_IMAGE_MODEL})` : "the text model's own SVG"));
+    console.log(`Slide illustrations: ${illus}`);
+    if (!geminiEnabled && !deepseekEnabled) console.warn('WARNING: no text provider set — set GEMINI_API_KEY or DEEPSEEK_API_KEY in .env. AI features will fail.');
+  });
+}
+
+startServer().catch((e) => {
+  console.error('Failed to start SketchLearn:', e.message);
+  process.exit(1);
 });

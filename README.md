@@ -27,6 +27,10 @@ cp .env.example .env      # then put your DeepSeek API key in .env
 npm start                 # → http://localhost:3000
 ```
 
+For production on Vercel, set `DATABASE_URL` (or `POSTGRES_URL`).
+When present, the server stores users, game records, and home recommendation caches in Postgres.
+Without it, the app falls back to local JSON files in `data/`.
+
 Sign in with `admin` / `123456`, then change the password from **My stats → Change my password**
 (or from the dashboard) and add users from the **Dashboard**.
 
@@ -44,6 +48,8 @@ Sign in with `admin` / `123456`, then change the password from **My stats → Ch
 4. On finish, `POST /api/ai/recommend` grades the run and `POST /api/games` records it to JSON.
 
 ## Data files (created at runtime, git-ignored)
+
+If Postgres is configured, these become local fallback/dev artifacts.
 
 | File | Contents |
 | --- | --- |
