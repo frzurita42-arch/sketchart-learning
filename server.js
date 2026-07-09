@@ -1184,6 +1184,64 @@ Rules:
   }
 });
 
+// ---------- AI: suggested topic + settings for structured explanations ----------
+app.post('/api/ai/structured-explanation-suggest', auth, async (req, res) => {
+  const { avoidPrompts = [] } = req.body || {};
+  const avoidSet = new Set((Array.isArray(avoidPrompts) ? avoidPrompts : []).map(v => String(v || '').trim().toLowerCase()).filter(Boolean));
+
+  const fallback = {
+    prompt: 'Bayes theorem for medical test interpretation',
+    exampleType: 'proof',
+    level: 'Upper Intermediate',
+    tone: 'Friendly lecture',
+    complexity: 'standard',
+    paragraphLength: 'medium',
+    imageDensity: 'balanced',
+    totalSlides: 8,
+    continuation: 'related-topics',
+    alternateVisualMath: true
+  };
+
+  try {
+    const games = recentUserGames(req.user.username, 20);
+    const interests = [...new Set(games.map(g => `${g.topic} / ${g.concept}`).filter(Boolean))].slice(-12);
+    const result = await generateStructured([
+      {
+        role: 'system',
+        content: `Return JSON only with this schema:
+{"prompt":string,"exampleType":"proof"|"worked-example"|"graph-table"|"tree-diagram"|"outline","level":"Beginner"|"Lower Intermediate"|"Upper Intermediate"|"Advanced"|"PhD","tone":string,"complexity":"simple"|"standard"|"scholarly","paragraphLength":"brief"|"medium"|"detailed","imageDensity":"text-only"|"mostly-text"|"balanced"|"mostly-visual","totalSlides":number,"continuation":"more-examples"|"different-examples"|"related-topics","alternateVisualMath":boolean}
+Rules:
+- Suggest one rigorous but teachable structured-explanation topic.
+- It may be math, science, economics, computing, or other structured reasoning domains.
+- Include settings that fit the topic and remain editable by the user.
+- Keep prompt concise and classroom-safe.`
+      },
+      {
+        role: 'user',
+        content: `Learner recent interests:\n${interests.join('\n') || 'none yet'}\n\nAvoid prompts:\n${[...avoidSet].join('\n') || 'none'}`
+      }
+    ], { temperature: 0.8, maxTokens: 700 });
+
+    const prompt = String(result.prompt || '').trim();
+    const out = {
+      prompt: (prompt && !avoidSet.has(prompt.toLowerCase())) ? prompt : fallback.prompt,
+      exampleType: ['proof', 'worked-example', 'graph-table', 'tree-diagram', 'outline'].includes(result.exampleType) ? result.exampleType : fallback.exampleType,
+      level: ['Beginner', 'Lower Intermediate', 'Upper Intermediate', 'Advanced', 'PhD'].includes(result.level) ? result.level : fallback.level,
+      tone: String(result.tone || '').trim() || fallback.tone,
+      complexity: ['simple', 'standard', 'scholarly'].includes(result.complexity) ? result.complexity : fallback.complexity,
+      paragraphLength: ['brief', 'medium', 'detailed'].includes(result.paragraphLength) ? result.paragraphLength : fallback.paragraphLength,
+      imageDensity: ['text-only', 'mostly-text', 'balanced', 'mostly-visual'].includes(result.imageDensity) ? result.imageDensity : fallback.imageDensity,
+      totalSlides: Math.min(20, Math.max(2, parseInt(result.totalSlides, 10) || fallback.totalSlides)),
+      continuation: ['more-examples', 'different-examples', 'related-topics'].includes(result.continuation) ? result.continuation : fallback.continuation,
+      alternateVisualMath: result.alternateVisualMath !== false
+    };
+
+    res.json(out);
+  } catch {
+    res.json(fallback);
+  }
+});
+
 // ---------- AI: refresh concepts for one level only ----------
 app.post('/api/ai/path/level-refresh', auth, async (req, res) => {
   const { topic, level, count = 5, avoidConcepts = [], guidance } = req.body || {};

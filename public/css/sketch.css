@@ -335,6 +335,17 @@ table.sketch tr:nth-child(even) td { background: #fffbe8; }
 /* ---------- settings grid ---------- */
 .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
 
+/* ---------- home footer ---------- */
+.home-footer {
+  max-width: 900px;
+  margin: 28px auto 6px;
+  text-align: center;
+  opacity: .78;
+  font-size: .98rem;
+  border-top: 2px dashed var(--ink);
+  padding-top: 12px;
+}
+
 /* ---------- responsive ---------- */
 @media (max-width: 640px) {
   body { font-size: 17px; }
