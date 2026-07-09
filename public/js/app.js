@@ -256,9 +256,10 @@ async function refreshHomeTopics({ silent = false, forceRefresh = false } = {}) 
   }
 }
 
-// A small wood-plank banner with the activity's how-to, shown under its title.
+// A slab of wood with a white paper note pinned on it, carrying the activity's
+// how-to, shown centered under each activity title.
 function renderInstructionPlank(html) {
-  return `<div class="instruction-plank"><p>${html}</p></div>`;
+  return `<div class="instruction-plank"><div class="plank-note"><p>${html}</p></div></div>`;
 }
 
 function renderHomeFeed() {
