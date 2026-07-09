@@ -1232,15 +1232,33 @@ function makeFallbackSlide({ topic, concept, level, settings = {}, slideNumber, 
     : 'This slide builds a strong baseline before moving to harder cases.';
 
   const isTimeTravel = /time\s*travel|\bfuture\b|\bpast\b|\bpresent\b|headline|news/i.test(`${topic} ${concept} ${settings.customInstructions || ''}`);
-  const components = [
-    { type: 'text', content: proofMode
-      ? `At ${level} level, this proof page builds the derivation for ${concept}. Read the comments on the right of each line; they explain why the step is valid and how the proof continues. (${paragraphWords} style)`
-      : `At ${level} level, this step focuses on ${concept}. The goal is to connect the idea to real choices, constraints, and outcomes, not just memorize definitions. Read each paragraph and look for cause-effect logic you can reuse in new situations. (${paragraphWords} style)` },
-    { type: 'text', content: proofMode
-      ? `${adaptationLine} Keep the proof in one continuous block, and use the learner's previous answer to either repair a missing step or deepen the derivation.`
-      : `${adaptationLine} Use the topic context (${topic}) to ask: what changes, what stays stable, and what evidence would confirm your interpretation? This comparison mindset prevents shallow pattern matching and improves transfer to unfamiliar examples.` },
-    ...(proofMode ? [] : [{ type: 'text', content: `Before the next slide, summarize the concept in one sentence, then test it on a small scenario. If your explanation predicts outcomes and trade-offs, your understanding is likely solid; if not, revisit the key mechanism and assumptions.` }])
-  ];
+
+  // Honor the learner's "paragraphs per slide" setting even in the offline fallback:
+  // build exactly paraCount distinct paragraphs from a varied, coherent pool.
+  const paraCount = Math.min(7, Math.max(1, parseInt(settings.paragraphCount, 10) || 3));
+  const paraPool = proofMode
+    ? [
+        `At ${level} level, this proof page builds the derivation for ${concept}. Read the comments on the right of each line; they explain why the step is valid and how the proof continues. (${paragraphWords} style)`,
+        `${adaptationLine} Keep the proof in one continuous block, and use the learner's previous answer to either repair a missing step or deepen the derivation.`,
+        `State the assumptions first: what is given, what must be shown, and which prior result you are allowed to invoke for ${concept}. Naming these up front keeps the derivation honest.`,
+        `Advance exactly one step, then justify it in words before writing the next line. A proof is only as strong as the weakest link, so each transition must follow necessarily from the last.`,
+        `Watch the boundary and edge cases for ${concept}: where does the argument nearly break, and what condition rescues it? Handling these is what separates a sketch from a real proof.`,
+        `Now consolidate: restate what the last few lines established and how they move you toward the goal, so the thread of the argument stays visible.`,
+        `Before the next slide, try to reproduce this step from memory. If you can rebuild the logic unaided, you understand it; if not, revisit the assumption that made the step valid.`
+      ]
+    : [
+        `At ${level} level, this step focuses on ${concept}. The goal is to connect the idea to real choices, constraints, and outcomes, not just memorize definitions. Read each paragraph and look for cause-effect logic you can reuse in new situations. (${paragraphWords} style)`,
+        `${adaptationLine} Use the topic context (${topic}) to ask: what changes, what stays stable, and what evidence would confirm your interpretation? This comparison mindset prevents shallow pattern matching and improves transfer to unfamiliar examples.`,
+        `Ground it in a concrete example drawn from ${topic}. Walk through one specific case slowly, naming the moving parts, so the abstract idea has something tangible to hang on.`,
+        `Now contrast that case with a near-miss — a situation that looks similar but behaves differently. The boundary between them is usually where the real understanding of ${concept} lives.`,
+        `Trace the consequences one more layer out: if this idea holds, what follows next, and what would you expect to observe? Predictions you can check are the fastest way to test comprehension.`,
+        `Tie it back to what the previous slide established so the lesson reads as one continuous argument rather than isolated facts, and set up the question that comes next.`,
+        `Before the next slide, summarize the concept in one sentence, then test it on a small scenario. If your explanation predicts outcomes and trade-offs, your understanding is likely solid; if not, revisit the key mechanism and assumptions.`
+      ];
+  const components = [];
+  for (let i = 0; i < paraCount; i++) {
+    components.push({ type: 'text', content: paraPool[i % paraPool.length] });
+  }
 
   if (proofMode) {
     components.push({
