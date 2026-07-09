@@ -1164,11 +1164,12 @@ function summarizeSlideVisuals(slide) {
       if (c.type === 'table') {
         const headers = Array.isArray(c.headers) ? c.headers.join(' | ') : '';
         const firstRow = Array.isArray(c.rows) && c.rows[0] ? c.rows[0].join(' | ') : '';
-        return `table:${toText(headers)}::${toText(firstRow)}`.slice(0, 180);
+        const secondRow = Array.isArray(c.rows) && c.rows[1] ? c.rows[1].join(' | ') : '';
+        return `table:${toText(c.caption)}::${toText(headers)}::${toText(firstRow)}::${toText(secondRow)}`.slice(0, 220);
       }
-      if (c.type === 'svg') return `svg:${toText(c.caption)}`.slice(0, 180);
-      if (c.type === 'image') return `image:${toText(c.caption || c.prompt || c.alt)}`.slice(0, 180);
-      if (c.type === 'latex') return `latex:${toText(c.caption || c.content)}`.slice(0, 180);
+      if (c.type === 'svg') return `svg:${toText(c.caption)}::${toText(String(c.svg || '').replace(/\s+/g, ' ').slice(0, 120))}`.slice(0, 220);
+      if (c.type === 'image') return `image:${toText(c.caption || c.prompt || c.alt)}::${toText(c.prompt || '')}`.slice(0, 220);
+      if (c.type === 'latex') return `latex:${toText(c.caption || '')}::${toText(c.content || '')}`.slice(0, 220);
       if (c.type === 'code') return `code:${toText(c.language)}:${toText(c.content).split('\n')[0]}`.slice(0, 180);
       return '';
     })

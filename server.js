@@ -1316,11 +1316,15 @@ function componentVisualSignature(component) {
   if (component.type === 'table') {
     const headers = Array.isArray(component.headers) ? component.headers.join('|') : '';
     const firstRow = Array.isArray(component.rows) && component.rows[0] ? component.rows[0].join('|') : '';
-    return `table:${clean(headers)}::${clean(firstRow)}`.slice(0, 220);
+    const secondRow = Array.isArray(component.rows) && component.rows[1] ? component.rows[1].join('|') : '';
+    return `table:${clean(component.caption)}::${clean(headers)}::${clean(firstRow)}::${clean(secondRow)}`.slice(0, 260);
   }
-  if (component.type === 'svg') return `svg:${clean(component.caption)}`.slice(0, 220);
-  if (component.type === 'image') return `image:${clean(component.caption || component.prompt || component.alt)}`.slice(0, 220);
-  if (component.type === 'latex') return `latex:${clean(component.caption || component.content)}`.slice(0, 220);
+  if (component.type === 'svg') {
+    const svgLead = clean(String(component.svg || '').replace(/\s+/g, ' ').slice(0, 120));
+    return `svg:${clean(component.caption)}::${svgLead}`.slice(0, 260);
+  }
+  if (component.type === 'image') return `image:${clean(component.caption || component.prompt || component.alt)}::${clean(component.prompt || '')}`.slice(0, 260);
+  if (component.type === 'latex') return `latex:${clean(component.caption || '')}::${clean(component.content || '')}`.slice(0, 260);
   if (component.type === 'code') return `code:${clean(component.language)}:${clean(String(component.content || '').split('\n')[0])}`.slice(0, 220);
   return '';
 }
@@ -1333,6 +1337,11 @@ function enforceSlideVisualPolicy(slide, history = [], slideNumber = 1) {
       .map(v => String(v || '').trim().toLowerCase())
       .filter(Boolean)
   );
+  const previousTypes = new Set(
+    [...previous]
+      .map(v => String(v).split(':')[0])
+      .filter(Boolean)
+  );
 
   const components = Array.isArray(slide.components) ? slide.components : [];
   const visualIndexes = components
@@ -1340,7 +1349,10 @@ function enforceSlideVisualPolicy(slide, history = [], slideNumber = 1) {
     .filter(x => visualTypes.has(x.c?.type));
 
   if (visualIndexes.length > 1) {
-    const preferred = visualIndexes.find(v => v.sig && !previous.has(v.sig.toLowerCase())) || visualIndexes[0];
+    const preferred =
+      visualIndexes.find(v => v.sig && !previous.has(v.sig.toLowerCase())) ||
+      visualIndexes.find(v => !previousTypes.has(String(v.c?.type || '').toLowerCase())) ||
+      visualIndexes[0];
     slide.components = components.filter((_, idx) => !visualIndexes.some(v => v.idx === idx) || idx === preferred.idx);
   }
 
@@ -1352,30 +1364,40 @@ function enforceSlideVisualPolicy(slide, history = [], slideNumber = 1) {
 
   // Ensure uniqueness when a repeated visual slips through by adjusting the component content.
   if (oneVisual.type === 'table' && Array.isArray(oneVisual.rows)) {
-    oneVisual.rows.push([
-      `Slide ${slideNumber} focus`,
-      'New evidence',
-      'New constraint',
-      'Best choice for this question'
-    ].slice(0, Math.max(2, (oneVisual.headers || []).length || 4)));
-    if (!oneVisual.caption) oneVisual.caption = `Slide ${slideNumber} comparison table`;
+    const width = Math.max(2, (oneVisual.headers || []).length || 4);
+    const forcedRow = [
+      `Slide ${slideNumber} scenario`,
+      'Unique driver',
+      'Distinct trade-off',
+      'Best decision for this quiz'
+    ].slice(0, width);
+    if (!Array.isArray(oneVisual.rows)) oneVisual.rows = [];
+    oneVisual.rows = [forcedRow, ...oneVisual.rows].slice(0, 8);
+    if (!Array.isArray(oneVisual.headers) || !oneVisual.headers.length) {
+      oneVisual.headers = ['Scenario', 'Signal', 'Trade-off', 'Decision'].slice(0, width);
+    }
+    oneVisual.caption = `Slide ${slideNumber}: ${String(oneVisual.caption || 'comparison table').trim()}`;
     return;
   }
   if (oneVisual.type === 'svg') {
-    oneVisual.caption = `${String(oneVisual.caption || 'Diagram').trim()} (slide ${slideNumber} view)`;
+    oneVisual.caption = `Slide ${slideNumber}: ${String(oneVisual.caption || 'Diagram').trim()}`;
+    if (typeof oneVisual.svg === 'string' && oneVisual.svg.includes('<svg')) {
+      oneVisual.svg = oneVisual.svg.replace(/<svg\b/, `<svg data-slide="${slideNumber}"`);
+    }
     return;
   }
   if (oneVisual.type === 'image') {
-    oneVisual.caption = `${String(oneVisual.caption || 'Illustration').trim()} (slide ${slideNumber})`;
-    if (oneVisual.prompt) oneVisual.prompt = `${String(oneVisual.prompt).trim()} Emphasize slide ${slideNumber} specifics.`;
+    oneVisual.caption = `Slide ${slideNumber}: ${String(oneVisual.caption || 'Illustration').trim()}`;
+    if (oneVisual.prompt) oneVisual.prompt = `Slide ${slideNumber} focus. ${String(oneVisual.prompt).trim()}`;
     return;
   }
   if (oneVisual.type === 'latex') {
-    oneVisual.caption = `${String(oneVisual.caption || 'Formula').trim()} (slide ${slideNumber})`;
+    oneVisual.caption = `Slide ${slideNumber}: ${String(oneVisual.caption || 'Formula').trim()}`;
     return;
   }
   if (oneVisual.type === 'code') {
-    oneVisual.content = `${String(oneVisual.content || '').trim()}\n// slide ${slideNumber} variant`;
+    const base = String(oneVisual.content || '').trim();
+    oneVisual.content = `// slide ${slideNumber} variant\n${base}`;
   }
 }
 
