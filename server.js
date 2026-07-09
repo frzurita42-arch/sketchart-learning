@@ -693,6 +693,21 @@ app.post('/api/ai/slide', auth, async (req, res) => {
     : (allowModelSvg
       ? 'a LaTeX formula, a code snippet, or a labelled svg diagram'
       : 'a LaTeX formula or a code snippet');
+  const stemFocus = /math|physics|program|algorithm|computer|data|statistics|calculus|algebra|geometry|numerical|machine learning|ai|engineering|cryptography|proof|equation|formula|theorem|derivative|integral|linear algebra|probability/i
+    .test(`${topic} ${concept}`);
+  const equationDepth = {
+    brief: 'Use 1 compact but meaningful derivation/proof block with 2-4 lines.',
+    medium: 'Use a moderately detailed derivation/proof with 4-7 lines and at least one intermediate step.',
+    detailed: 'Use a longer derivation/proof with 7-12 lines, explicitly showing key intermediate steps and assumptions.'
+  }[settings.paragraphLength] || 'Use a moderately detailed derivation/proof with 4-7 lines and at least one intermediate step.';
+  const codeDepth = {
+    brief: 'Use a focused snippet around 8-15 lines.',
+    medium: 'Use a practical snippet around 16-28 lines.',
+    detailed: 'Use a richer snippet around 28-45 lines, still coherent and runnable.'
+  }[settings.paragraphLength] || 'Use a practical snippet around 16-28 lines.';
+  const stemAlternation = slideNumber % 2 === 1
+    ? 'STEM alternation for this slide: emphasize theory + formulas/proof first, then support with a visual aid.'
+    : 'STEM alternation for this slide: emphasize visual intuition first, then include code or formulas/proof with detailed explanation.';
 
   const system = `You are an expert teacher generating ONE slide of an adaptive learning presentation. Respond ONLY with JSON in this schema:
 {
@@ -720,6 +735,10 @@ Rules:
 - LENGTH: the slide MUST contain exactly ${paraCount} distinct paragraph(s) of prose (as separate "text" components), each about ${paragraphWords} words. Do not collapse them, and do not pad — each paragraph carries new substance. ${densityRule}
 - COHESION: the paragraphs must build on one another in order — introduce the idea, develop it, then apply or consolidate it — never restating the same point. The slide must also connect to the previous slides (briefly recall or build on them) and set up what comes next, so the whole presentation reads as one continuous, complementary lesson rather than isolated cards.
  - VISUALS: pick the visual that BEST fits this slide and make it ACCURATELY represent what the paragraphs say — never a generic or decorative figure (no meaningless Venn diagrams, plain squares, or random shapes). Choose from ${visualMenu}: use a LaTeX formula when the idea is mathematical, a code snippet (with the correct language) when it is about programming/algorithms/data, ${imageEnabled ? 'and a generated image when a rich pictorial or real-world depiction helps understanding. ' : ''}${allowModelSvg ? 'and a labelled svg diagram when the idea is a structure, process, or relationship. ' : ''}Vary the visual type across consecutive slides, and you may combine two (e.g. a formula AND an image). Prefer inline $...$ math inside paragraphs wherever a symbol or equation is mentioned.
+- If a code snippet is included: ${codeDepth} Include clear inline comments that explain non-obvious lines and decisions.
+- If a LaTeX formula/proof block is included: ${equationDepth} Follow it with explanatory text that walks through the symbols and logic step-by-step.
+- Any formula/proof/code explanation should be as substantial as the selected paragraph length setting; avoid tiny token examples for long-form settings.
+- ${stemFocus ? `${stemAlternation} For this STEM-heavy concept, include both: (1) a visual component (image/svg when available) and (2) either a code snippet or a LaTeX formula/proof block, plus textual explanation tying them together.` : 'Use STEM-style formula/code components only when they naturally fit the concept.'}
 - Tone/sentiment of all writing: ${settings.tone || 'friendly lecture'}. Complexity of language: ${settings.complexity || 'standard'}. Audience level: ${level}.
 ${settings.language ? `- Write ALL text (including quiz and explanations) in ${settings.language}.\n` : ''}${settings.audience ? `- The reader is: ${settings.audience}. Pitch every explanation to them.\n` : ''}${settings.customInstructions ? `- Extra author instructions from the learner (follow them where they don't conflict with the schema): ${settings.customInstructions}\n` : ''}
 - The ${paraCount} substantive paragraph(s) are required every time, alongside the chosen visual(s).
