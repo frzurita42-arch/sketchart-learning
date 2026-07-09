@@ -1126,6 +1126,64 @@ app.post('/api/ai/suggested-topic/preload', auth, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- AI: random headline for time-travel news generator ----------
+app.post('/api/ai/time-travel-headline', auth, async (req, res) => {
+  const { period = 'future', avoidHeadlines = [] } = req.body || {};
+  const normalizedPeriod = ['past', 'present', 'future'].includes(String(period).toLowerCase())
+    ? String(period).toLowerCase()
+    : 'future';
+  const avoidSet = new Set((Array.isArray(avoidHeadlines) ? avoidHeadlines : []).map(v => String(v || '').trim().toLowerCase()).filter(Boolean));
+
+  const fallbackPool = {
+    past: [
+      'Printing Press Sparks Knowledge Boom Across Europe',
+      'Ancient Engineers Race to Rebuild Earthquake-Struck Harbor',
+      'Young Astronomers Redraw the Night Sky with New Instruments',
+      'City-State Debates First Public Health Rules After Outbreak'
+    ],
+    present: [
+      'Local Grid Uses AI Forecasts to Prevent Blackouts During Heat Wave',
+      'Students Track Urban Flood Risks with Open Satellite Data',
+      'Community Lab Designs Low-Cost Air Quality Alerts',
+      'Hospitals Test New Data Dashboards to Speed Emergency Care'
+    ],
+    future: [
+      'Mars Transit Council Approves First Interplanetary Water Treaty',
+      'Floating Cities Deploy Storm-Deflection Fields Ahead of Mega Cyclone',
+      'Lunar Farms Rewrite Food Supply Chains for Deep-Space Colonies',
+      'Quantum Weather Net Warns Coastal Regions 30 Days Earlier'
+    ]
+  };
+
+  try {
+    const games = recentUserGames(req.user.username, 20);
+    const interests = [...new Set(games.map(g => `${g.topic} / ${g.concept}`).filter(Boolean))].slice(-10);
+    const result = await generateStructured([
+      {
+        role: 'system',
+        content: `Return JSON only: {"headline":string}
+Rules:
+- Create one compelling news-style headline.
+- The scenario must be in the ${normalizedPeriod}.
+- Keep it educational and problem-solving oriented.
+- 7-16 words, classroom-safe, no sensational violence.`
+      },
+      {
+        role: 'user',
+        content: `Learner interests:\n${interests.join('\n') || 'none yet'}\n\nTrend seeds:\n${GLOBAL_TREND_SEEDS.join('\n')}\n\nAvoid headlines:\n${[...avoidSet].join('\n') || 'none'}`
+      }
+    ], { temperature: 0.85, maxTokens: 240 });
+
+    const raw = String(result.headline || '').trim();
+    if (raw && !avoidSet.has(raw.toLowerCase())) return res.json({ headline: raw });
+    throw new Error('Invalid headline');
+  } catch {
+    const pool = fallbackPool[normalizedPeriod] || fallbackPool.future;
+    const candidate = pool.find(h => !avoidSet.has(h.toLowerCase())) || pool[0];
+    res.json({ headline: candidate });
+  }
+});
+
 // ---------- AI: refresh concepts for one level only ----------
 app.post('/api/ai/path/level-refresh', auth, async (req, res) => {
   const { topic, level, count = 5, avoidConcepts = [], guidance } = req.body || {};
