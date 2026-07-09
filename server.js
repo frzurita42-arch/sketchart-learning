@@ -1519,11 +1519,58 @@ async function geminiImage(prompt) {
   return null;
 }
 
+function escXml(s = '') {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function fallbackImageDataUrl(prompt = '', caption = '') {
+  const era = inferTimeEraHint(`${prompt} ${caption}`);
+  const palette = era === 'future'
+    ? { bg: '#e8f3ff', accent: '#5c80bc', ink: '#17324d' }
+    : era === 'past'
+      ? { bg: '#f7efe1', accent: '#a36a2c', ink: '#3b2611' }
+      : { bg: '#edf6ef', accent: '#3f8a58', ink: '#173223' };
+  const eraLabel = era.toUpperCase();
+  const a = escXml(String(caption || 'Time Travel scene').slice(0, 72));
+  const b = escXml(String(prompt).replace(/\s+/g, ' ').trim().slice(0, 96));
+  const c = escXml(String(prompt).replace(/\s+/g, ' ').trim().slice(96, 190));
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="${a}">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="${palette.bg}"/>
+      <stop offset="100%" stop-color="#ffffff"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#g)"/>
+  <rect x="56" y="56" width="912" height="912" rx="28" fill="none" stroke="${palette.accent}" stroke-width="10"/>
+  <text x="84" y="130" font-family="Georgia, serif" font-size="42" fill="${palette.ink}">${eraLabel} SCENE</text>
+  <text x="84" y="196" font-family="Georgia, serif" font-size="34" fill="${palette.ink}">${a}</text>
+  <text x="84" y="252" font-family="Arial, sans-serif" font-size="24" fill="${palette.ink}">${b}</text>
+  <text x="84" y="290" font-family="Arial, sans-serif" font-size="24" fill="${palette.ink}">${c}</text>
+  <g stroke="${palette.ink}" stroke-width="8" fill="none" opacity="0.9">
+    <path d="M110 760 C 250 640, 380 650, 520 760"/>
+    <path d="M500 760 C 640 620, 760 640, 900 760"/>
+    <rect x="180" y="520" width="170" height="210" rx="8" fill="${palette.accent}" opacity="0.2"/>
+    <rect x="390" y="450" width="220" height="280" rx="8" fill="${palette.accent}" opacity="0.16"/>
+    <rect x="660" y="500" width="170" height="230" rx="8" fill="${palette.accent}" opacity="0.2"/>
+  </g>
+</svg>`;
+
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
 // Turn any {type:"image", prompt} components into real images; drop ones that fail.
 async function fillImages(components) {
   for (const c of components) {
     if (c && c.type === 'image' && !c.url && c.prompt) {
       c.url = await generateImage(`${c.prompt}. Educational illustration in a hand-drawn sketch / paper-collage style, muted warm palette (paper cream, soft orange, green, blue), clear and uncluttered.`);
+      if (!c.url) c.url = fallbackImageDataUrl(c.prompt, c.caption);
       delete c.prompt;
     }
   }
@@ -2061,7 +2108,7 @@ app.post('/api/ai/slide', auth, async (req, res) => {
       ? 'a LaTeX formula, a code snippet, a compact table, or a labelled svg diagram'
       : 'a LaTeX formula, a code snippet, or a compact table');
   const isTimeTravelActivity = /time\s*travel|\bfuture\b|\bpast\b|\bpresent\b|headline|news/i.test(`${topic} ${concept} ${settings.customInstructions || ''}`);
-  const canGenerateImage = imageEnabled || geminiEnabled;
+  const canGenerateImage = true;
   const stemFocus = /math|physics|program|algorithm|computer|data|statistics|calculus|algebra|geometry|numerical|machine learning|ai|engineering|cryptography|proof|equation|formula|theorem|derivative|integral|linear algebra|probability/i
     .test(`${topic} ${concept}`);
   const equationDepth = {
@@ -2090,7 +2137,7 @@ app.post('/api/ai/slide', auth, async (req, res) => {
    {"type":"table","headers":[string,...],"rows":[[string,...],...],"caption":string} |
    {"type":"latex","content":string (a DISPLAY formula in LaTeX, WITHOUT surrounding $),"caption":string} |
    {"type":"code","language":string,"content":string (a real, correct, well-formatted snippet with newlines)} |
-   ${allowModelSvg ? '{"type":"svg","svg":"<svg...>","caption":string} |\n   ' : ''}{"type":"image","prompt":string (vivid description of an illustration to GENERATE that depicts THIS slide's concept),"frame":"paper"|"polaroid","caption":string}${imageEnabled ? '' : ' (allowed only when IMAGE_API_KEY or GEMINI_API_KEY is configured)'}
+  ${allowModelSvg ? '{"type":"svg","svg":"<svg...>","caption":string} |\n   ' : ''}{"type":"image","prompt":string (vivid description of an illustration to GENERATE that depicts THIS slide's concept),"frame":"paper"|"polaroid","caption":string}
  ],
  "quiz": {
    "question": string,
@@ -2163,7 +2210,7 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
   try {
     const slide = await generateStructured([{ role: 'system', content: system }, { role: 'user', content: user }], { temperature: 0.85, maxTokens: 8192 });
     slide.components = sanitizeComponents(slide.components);
-    if (isTimeTravelActivity && settings.imageDensity !== 'text-only' && canGenerateImage) {
+    if (isTimeTravelActivity && settings.imageDensity !== 'text-only') {
       enforceTimeTravelImagePolicy(slide, {
         topic,
         concept,
