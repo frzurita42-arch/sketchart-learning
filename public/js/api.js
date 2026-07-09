@@ -15,14 +15,26 @@ const API = {
   },
 
   async call(method, url, body) {
-    const res = await fetch(url, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(this.token ? { Authorization: `Bearer ${this.token}` } : {})
-      },
-      body: body ? JSON.stringify(body) : undefined
-    });
+    const controller = new AbortController();
+    const timeoutMs = 30000;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let res;
+    try {
+      res = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(this.token ? { Authorization: `Bearer ${this.token}` } : {})
+        },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal
+      });
+    } catch (err) {
+      if (err && err.name === 'AbortError') throw new Error('Request timed out. Please try again.');
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
     let data = null;
     try { data = await res.json(); } catch { /* non-JSON error body */ }
     if (res.status === 401 && this.token) {

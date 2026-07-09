@@ -1240,23 +1240,26 @@ async function finishGame() {
   $app.innerHTML = loadingHTML('Grading your sketchbook…');
 
   let rec = null;
+  let gradingNote = '';
   try {
-    rec = await API.post('/api/ai/recommend', {
+    rec = await withTimeout(API.post('/api/ai/recommend', {
       topic: g.topic, concept: g.concept, level: g.level,
       correct, total, durationSec, slides: g.answers
-    });
-  } catch { /* recommendations are a bonus; stats still shown */ }
+    }), 12000, 'Coach grading took too long. Showing report without coach notes.');
+  } catch (e) {
+    gradingNote = `<p class="form-error">${esc(e.message || 'Coach grading was unavailable. Showing report without coach notes.')}</p>`;
+  }
 
   let saveNote = '';
   let saved = null;
   try {
-    saved = await API.post('/api/games', {
+    saved = await withTimeout(API.post('/api/games', {
       topic: g.topic, concept: g.concept, level: g.level, settings: g.settings,
       slides: g.answers, correct, total, durationSec, recommendations: rec,
       questionSummary,
       answerSummary,
       aiNotes: rec?.aiNotes || []
-    });
+    }), 12000, 'Saving took too long. Report is visible, but this run may not be in history yet.');
   } catch (e) { saveNote = `<p class="form-error">Could not save this run: ${esc(e.message)}</p>`; }
 
   const mins = `${Math.floor(durationSec / 60)}:${String(durationSec % 60).padStart(2, '0')}`;
@@ -1288,6 +1291,7 @@ async function finishGame() {
             <ul style="padding-left:22px;margin-top:6px">${(rec.recommendations || []).map(r => `<li>${esc(r)}</li>`).join('')}</ul>
             ${(rec.nextConcepts || []).length ? `<p style="margin-top:6px"><b>Try next:</b> ${rec.nextConcepts.map(n => `${esc(n.name)} (${esc(n.level)})`).join(' · ')}</p>` : ''}
           </div>` : ''}
+        ${gradingNote}
         ${saveNote}
         <div class="slide-actions">
           <button class="btn" id="fin-stats">My stats</button>

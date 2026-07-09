@@ -232,6 +232,21 @@ label.field > span { display: block; margin-bottom: 4px; }
 .comp-image figcaption { font-family: var(--font-title); font-size: 1.1rem; margin-top: 8px; }
 .comp-image.polaroid figcaption { transform: rotate(0); }
 
+/* ---------- compact slide table ---------- */
+.comp-table { margin-top: 6px; }
+.comp-table table.mini {
+  width: 100%;
+  table-layout: auto;
+  font-size: .92rem;
+}
+.comp-table table.mini th,
+.comp-table table.mini td {
+  padding: 8px 10px;
+  vertical-align: top;
+  word-break: break-word;
+}
+.comp-table figcaption { font-size: .9rem; opacity: .78; margin-top: 6px; }
+
 /* ---------- quiz ---------- */
 .quiz-box { margin-top: 20px; border-top: 3px dashed var(--ink); padding-top: 16px; }
 .quiz-q { font-weight: bold; margin-bottom: 12px; }

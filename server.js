@@ -1162,11 +1162,32 @@ function makeFallbackSlide({ topic, concept, level, settings = {}, slideNumber, 
       : `This slide targets a common misconception: ${String(branch.misconception || 'mixing up the core idea with a related one')}.`)
     : 'This slide builds a strong baseline before moving to harder cases.';
 
+  const isTimeTravel = /time\s*travel|\bfuture\b|\bpast\b|\bpresent\b|headline|news/i.test(`${topic} ${concept} ${settings.customInstructions || ''}`);
   const components = [
     { type: 'text', content: `At ${level} level, this step focuses on ${concept}. The goal is to connect the idea to real choices, constraints, and outcomes, not just memorize definitions. Read each paragraph and look for cause-effect logic you can reuse in new situations. (${paragraphWords} style)` },
     { type: 'text', content: `${adaptationLine} Use the topic context (${topic}) to ask: what changes, what stays stable, and what evidence would confirm your interpretation? This comparison mindset prevents shallow pattern matching and improves transfer to unfamiliar examples.` },
     { type: 'text', content: `Before the next slide, summarize the concept in one sentence, then test it on a small scenario. If your explanation predicts outcomes and trade-offs, your understanding is likely solid; if not, revisit the key mechanism and assumptions.` }
   ];
+
+  if (isTimeTravel) {
+    components.push({
+      type: 'table',
+      headers: ['Dimension', 'Past', 'Present', 'Future'],
+      rows: [
+        ['Main pressure', 'Resource scarcity', 'Infrastructure strain', 'Interplanetary coordination'],
+        ['Decision lens', 'Stability first', 'Risk balancing', 'Long-horizon resilience'],
+        ['Best metric', 'Survival rate', 'Service reliability', 'Sustainable treaty compliance']
+      ],
+      caption: 'Time-travel comparison frame for the same systems problem'
+    });
+    if (slideNumber % 2 === 1) {
+      components.push({
+        type: 'svg',
+        caption: 'Feedback loop from policy to infrastructure outcomes',
+        svg: `<svg viewBox="0 0 420 220" xmlns="http://www.w3.org/2000/svg"><rect x="16" y="18" width="120" height="48" rx="10" fill="#f7f3e9" stroke="#2d2a26" stroke-width="2.5"/><text x="28" y="48" font-size="14" fill="#2d2a26">Policy choice</text><rect x="150" y="18" width="120" height="48" rx="10" fill="#f7f3e9" stroke="#2d2a26" stroke-width="2.5"/><text x="170" y="48" font-size="14" fill="#2d2a26">Resource flow</text><rect x="284" y="18" width="120" height="48" rx="10" fill="#f7f3e9" stroke="#2d2a26" stroke-width="2.5"/><text x="300" y="48" font-size="14" fill="#2d2a26">System impact</text><path d="M136 42 L150 42" stroke="#2d2a26" stroke-width="2.5"/><path d="M270 42 L284 42" stroke="#2d2a26" stroke-width="2.5"/><path d="M344 66 C344 120, 74 120, 74 66" fill="none" stroke="#5c80bc" stroke-width="2.5"/><polygon points="69,70 74,58 79,70" fill="#5c80bc"/><rect x="92" y="132" width="238" height="62" rx="10" fill="#fffbe8" stroke="#2d2a26" stroke-width="2.5"/><text x="108" y="158" font-size="14" fill="#2d2a26">Review metric: reliability, fairness, sustainability</text><text x="108" y="178" font-size="14" fill="#2d2a26">Then adjust the next policy cycle</text></svg>`
+      });
+    }
+  }
 
   return {
     title,
@@ -1271,6 +1292,18 @@ function sanitizeComponents(components) {
   if (!Array.isArray(components)) return [];
   return components.map(c => {
     if (c && c.type === 'svg') c.svg = sanitizeSvg(c.svg);
+    if (c && c.type === 'table') {
+      const headers = Array.isArray(c.headers) ? c.headers.map(v => String(v || '').trim()).filter(Boolean).slice(0, 8) : [];
+      const rows = Array.isArray(c.rows)
+        ? c.rows
+            .map(r => Array.isArray(r) ? r.map(v => String(v || '').trim()).slice(0, Math.max(1, headers.length || 4)) : null)
+            .filter(Boolean)
+            .slice(0, 8)
+        : [];
+      c.headers = headers;
+      c.rows = rows;
+      c.caption = String(c.caption || '').trim();
+    }
     return c;
   }).filter(c => {
     if (!c || !c.type) return false;
@@ -1278,6 +1311,7 @@ function sanitizeComponents(components) {
     if (c.type === 'code') return !!c.content;
     if (c.type === 'latex') return !!c.content;
     if (c.type === 'image') return !!(c.url || c.prompt);
+    if (c.type === 'table') return Array.isArray(c.headers) && c.headers.length > 0 && Array.isArray(c.rows) && c.rows.length > 0;
     return true;
   });
 }
@@ -1861,10 +1895,12 @@ app.post('/api/ai/slide', auth, async (req, res) => {
     ? `\n   {"type":"image","prompt":string (vivid description of an illustration to GENERATE that depicts THIS slide's concept),"frame":"paper"|"polaroid","caption":string} |`
     : '';
   const visualMenu = imageEnabled
-    ? 'a LaTeX formula, a code snippet, or a generated image'
+    ? 'a LaTeX formula, a code snippet, a compact table, or a generated image'
     : (allowModelSvg
-      ? 'a LaTeX formula, a code snippet, or a labelled svg diagram'
-      : 'a LaTeX formula or a code snippet');
+      ? 'a LaTeX formula, a code snippet, a compact table, or a labelled svg diagram'
+      : 'a LaTeX formula, a code snippet, or a compact table');
+  const isTimeTravelActivity = /time\s*travel|\bfuture\b|\bpast\b|\bpresent\b|headline|news/i.test(`${topic} ${concept} ${settings.customInstructions || ''}`);
+  const shouldUseTableThisSlide = isTimeTravelActivity && slideNumber % 2 === 0;
   const stemFocus = /math|physics|program|algorithm|computer|data|statistics|calculus|algebra|geometry|numerical|machine learning|ai|engineering|cryptography|proof|equation|formula|theorem|derivative|integral|linear algebra|probability/i
     .test(`${topic} ${concept}`);
   const equationDepth = {
@@ -1890,6 +1926,7 @@ app.post('/api/ai/slide', auth, async (req, res) => {
    {"type":"keypoints","items":[string,...]} |
    {"type":"definition","term":string,"content":string} |
    {"type":"example","content":string} |
+   {"type":"table","headers":[string,...],"rows":[[string,...],...],"caption":string} |
    {"type":"latex","content":string (a DISPLAY formula in LaTeX, WITHOUT surrounding $),"caption":string} |
    {"type":"code","language":string,"content":string (a real, correct, well-formatted snippet with newlines)} |
    ${allowModelSvg ? '{"type":"svg","svg":"<svg...>","caption":string} |\n   ' : ''}{"type":"image","prompt":string (vivid description of an illustration to GENERATE that depicts THIS slide's concept),"frame":"paper"|"polaroid","caption":string}${imageEnabled ? '' : ' (allowed only when IMAGE_API_KEY or GEMINI_API_KEY is configured)'}
@@ -1907,10 +1944,16 @@ Rules:
 - LENGTH: the slide MUST contain exactly ${paraCount} distinct paragraph(s) of prose (as separate "text" components), each about ${paragraphWords} words. Do not collapse them, and do not pad — each paragraph carries new substance. ${densityRule}
 - COHESION: the paragraphs must build on one another in order — introduce the idea, develop it, then apply or consolidate it — never restating the same point. The slide must also connect to the previous slides (briefly recall or build on them) and set up what comes next, so the whole presentation reads as one continuous, complementary lesson rather than isolated cards.
  - VISUALS: pick the visual that BEST fits this slide and make it ACCURATELY represent what the paragraphs say — never a generic or decorative figure (no meaningless Venn diagrams, plain squares, or random shapes). Choose from ${visualMenu}: use a LaTeX formula when the idea is mathematical, a code snippet (with the correct language) when it is about programming/algorithms/data, ${imageEnabled ? 'and a generated image when a rich pictorial or real-world depiction helps understanding. ' : ''}${allowModelSvg ? 'and a labelled svg diagram when the idea is a structure, process, or relationship. ' : ''}Vary the visual type across consecutive slides, and you may combine two (e.g. a formula AND an image). Prefer inline $...$ math inside paragraphs wherever a symbol or equation is mentioned.
+- TABLES: when using a table, keep it compact (3-6 rows, 2-6 columns), label headers clearly, and ensure every row directly supports the slide's teaching point.
 - If a code snippet is included: ${codeDepth} Include clear inline comments that explain non-obvious lines and decisions.
 - If a LaTeX formula/proof block is included: ${equationDepth} Follow it with explanatory text that walks through the symbols and logic step-by-step.
 - Any formula/proof/code explanation should be as substantial as the selected paragraph length setting; avoid tiny token examples for long-form settings.
 - ${stemFocus ? `${stemAlternation} For this STEM-heavy concept, include both: (1) a visual component (image/svg when available) and (2) either a code snippet or a LaTeX formula/proof block, plus textual explanation tying them together.` : 'Use STEM-style formula/code components only when they naturally fit the concept.'}
+- ${isTimeTravelActivity
+    ? (shouldUseTableThisSlide
+      ? 'This is a Time Travel activity slide: include ONE table component that compares scenarios across periods (past/present/future or equivalent timeline stages), plus one additional visual aid (svg/image/latex/code as appropriate).'
+      : 'This is a Time Travel activity slide: include at least ONE strong visual aid (svg/image/table/latex/code) that makes the timeline dynamics explicit and practical.')
+    : 'For non-time-travel activities, include tables only when they add clear explanatory value.'}
 - Tone/sentiment of all writing: ${settings.tone || 'friendly lecture'}. Complexity of language: ${settings.complexity || 'standard'}. Audience level: ${level}.
 ${settings.language ? `- Write ALL text (including quiz and explanations) in ${settings.language}.\n` : ''}${settings.audience ? `- The reader is: ${settings.audience}. Pitch every explanation to them.\n` : ''}${settings.customInstructions ? `- Extra author instructions from the learner (follow them where they don't conflict with the schema): ${settings.customInstructions}\n` : ''}
 - The ${paraCount} substantive paragraph(s) are required every time, alongside the chosen visual(s).
