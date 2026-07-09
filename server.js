@@ -2991,6 +2991,16 @@ Use it to give concrete, personal guidance: point out strong/weak topics, sugges
   }
 });
 
+// Public runtime config so the client can show a "demo mode" banner when no AI is set.
+app.get('/api/config', (req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.json({
+    aiEnabled: !!(geminiEnabled || deepseekEnabled),
+    provider: geminiEnabled ? 'gemini' : (deepseekEnabled ? 'deepseek' : null),
+    imagesEnabled: !!imageEnabled
+  });
+});
+
 // SPA fallback — serves the cache-busted index so new deploys load fresh assets.
 app.get(/^\/(?!api\/).*/, (req, res) => {
   sendIndexHtml(res);

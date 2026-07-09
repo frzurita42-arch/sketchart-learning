@@ -84,6 +84,27 @@ function boot() {
   document.getElementById('whoami').textContent = `☺ ${API.user.username}`;
   document.getElementById('nav-dashboard').classList.toggle('hidden', API.user.role !== 'admin');
   viewHome();
+  checkDemoMode();
+}
+
+// Show a banner when the server has no AI provider connected, so placeholder
+// lessons/suggestions are clearly demo content rather than looking like bugs.
+async function checkDemoMode() {
+  if (sessionStorage.getItem('sl_demo_dismissed') === '1') return;
+  let cfg;
+  try { cfg = await API.get('/api/config'); } catch { return; }
+  if (!cfg || cfg.aiEnabled) { const el = document.getElementById('demo-banner'); if (el) el.remove(); return; }
+  if (document.getElementById('demo-banner')) return;
+  const el = document.createElement('div');
+  el.id = 'demo-banner';
+  el.className = 'demo-banner';
+  el.innerHTML = `<span><b>Demo mode</b> — no AI provider is connected, so lessons, charts and suggestions use built-in placeholder content. Set <b>GEMINI_API_KEY</b> or <b>DEEPSEEK_API_KEY</b> in your deployment for real AI lessons.</span>` +
+    `<button id="demo-banner-x" aria-label="Dismiss">×</button>`;
+  document.body.insertBefore(el, $app);
+  document.getElementById('demo-banner-x').addEventListener('click', () => {
+    sessionStorage.setItem('sl_demo_dismissed', '1');
+    el.remove();
+  });
 }
 
 /* ---------------- login ---------------- */

@@ -85,6 +85,36 @@ h3 { font-size: 1.5rem; }
 }
 .view-sub { text-align: center; opacity: .8; margin-bottom: 26px; }
 
+/* ---------- demo-mode banner (shown when no AI provider is connected) ---------- */
+.demo-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 900px;
+  margin: 12px auto 0;
+  padding: 10px 16px;
+  font-family: var(--font-hand);
+  font-size: 1rem;
+  color: #5a3a10;
+  background: repeating-linear-gradient(45deg, #ffe9a8 0 14px, #ffe29a 14px 28px);
+  border: 2.5px dashed #b9812a;
+  border-radius: var(--wobble);
+  box-shadow: 0 2px 0 rgba(120,80,20,.18);
+}
+.demo-banner span { flex: 1; line-height: 1.3; }
+.demo-banner b { color: #7a4d10; }
+.demo-banner #demo-banner-x {
+  flex: 0 0 auto;
+  font-family: var(--font-hand);
+  font-size: 1.3rem;
+  line-height: 1;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #7a4d10;
+  padding: 0 4px;
+}
+
 /* ---------- instruction plank ----------
    A honey/mustard slab of real-looking wood (organic SVG grain + knots) with a
    white paper note pinned on top, centered under each activity title. */
