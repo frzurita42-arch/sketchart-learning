@@ -1065,7 +1065,50 @@ function viewSettings() {
 }
 
 /* ---------------- the adaptive slide game ---------------- */
+/* ---------------- browser memory: cache prefetched branch slides in sessionStorage ----------------
+   Every option's next slide is generated in the background (the "loads"); the branches the
+   learner does not pick are dumped. sessionStorage keeps the resolved slides so re-picking or a
+   mid-lesson reload reuses them instead of regenerating, and clears when the game ends. */
+const SLIDE_MEM_PREFIX = 'sketch:slide:';
+
+function slideMemKey(gameId, slideNumber, branchText) {
+  return `${SLIDE_MEM_PREFIX}${gameId}:${slideNumber}:${hashText(branchText || 'root')}`;
+}
+function pruneSlideMem() {
+  try {
+    const keys = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i);
+      if (k && k.startsWith(SLIDE_MEM_PREFIX)) keys.push(k);
+    }
+    keys.slice(0, Math.ceil(keys.length / 2)).forEach(k => sessionStorage.removeItem(k));
+  } catch { /* sessionStorage unavailable */ }
+}
+function memGetSlide(gameId, slideNumber, branchText) {
+  try {
+    const v = sessionStorage.getItem(slideMemKey(gameId, slideNumber, branchText));
+    return v ? JSON.parse(v) : null;
+  } catch { return null; }
+}
+function memPutSlide(gameId, slideNumber, branchText, slide) {
+  if (!slide) return;
+  const write = () => sessionStorage.setItem(slideMemKey(gameId, slideNumber, branchText), JSON.stringify(slide));
+  try { write(); }
+  catch { pruneSlideMem(); try { write(); } catch { /* over quota, skip cache */ } }
+}
+function clearSlideMem(gameId) {
+  try {
+    const keys = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i);
+      if (k && (!gameId || k.startsWith(`${SLIDE_MEM_PREFIX}${gameId}:`))) keys.push(k);
+    }
+    keys.forEach(k => sessionStorage.removeItem(k));
+  } catch { /* sessionStorage unavailable */ }
+}
+
 async function startGame() {
+  clearSlideMem(); // fresh session memory for a new presentation
   state.game = {
     id: crypto.randomUUID(),
     topic: state.topic, concept: state.concept, level: state.level,
@@ -1244,8 +1287,10 @@ function showSlide(slide) {
   if (g.slideNumber < g.settings.totalSlides) {
     g.prefetch = slide.quiz.options.map((o) => {
       const branch = branchFor(slide, o);
-      const promise = requestSlide(branch, g.slideNumber + 1);
-      promise.catch(() => { }); // avoid unhandled rejection; retried on demand
+      const cached = memGetSlide(g.id, g.slideNumber + 1, branch.chosenText);
+      const promise = cached ? Promise.resolve(cached) : requestSlide(branch, g.slideNumber + 1);
+      // store each resolved branch in browser memory so re-picks/reloads reuse it
+      promise.then(s => memPutSlide(g.id, g.slideNumber + 1, branch.chosenText, s)).catch(() => { });
       return promise;
     });
   }
@@ -1333,8 +1378,11 @@ async function advance(idx, branch) {
     try {
       slide = await g.prefetch[idx]; // usually already resolved
     } catch {
-      slide = await requestSlide(branch, g.slideNumber + 1); // prefetch failed → retry live
+      // prefetch failed → reuse browser memory if present, else retry live
+      slide = memGetSlide(g.id, g.slideNumber + 1, branch.chosenText)
+        || await requestSlide(branch, g.slideNumber + 1);
     }
+    memPutSlide(g.id, g.slideNumber + 1, branch.chosenText, slide);
     g.slideNumber++;
     showSlide(slide);
   } catch (e) { gameError(e, () => advance(idx, branch)); }
@@ -1356,6 +1404,7 @@ async function finishGame() {
   const g = state.game;
   g.finished = true;
   clearInterval(timerInterval);
+  clearSlideMem(g.id); // presentation done → dump its cached branch slides
   const durationSec = Math.floor((Date.now() - g.startTime) / 1000);
   const correct = g.answers.filter(a => a.correct).length;
   const total = g.answers.length;

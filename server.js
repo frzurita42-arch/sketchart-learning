@@ -1520,6 +1520,40 @@ function buildGenericImagePrompt(slide, context = {}) {
   ].join(' ');
 }
 
+// Human-readable snapshot of the learner's performance for AI suggestion prompts:
+// overall accuracy, weakest and strongest concepts, and the level they play most.
+function summarizeLearnerStatus(games = []) {
+  const list = Array.isArray(games) ? games.filter(g => g && (g.total || 0) > 0) : [];
+  if (!list.length) return 'No games played yet — treat as a fresh learner; keep the first suggestion approachable.';
+  let correctSum = 0, totalSum = 0;
+  const byConcept = new Map();
+  const levelCounts = new Map();
+  for (const g of list) {
+    const total = Math.max(1, Number(g.total) || 1);
+    const correct = Math.max(0, Number(g.correct) || 0);
+    correctSum += correct; totalSum += total;
+    const key = `${g.topic} / ${g.concept}`.trim();
+    const agg = byConcept.get(key) || { correct: 0, total: 0 };
+    agg.correct += correct; agg.total += total;
+    byConcept.set(key, agg);
+    if (g.level) levelCounts.set(g.level, (levelCounts.get(g.level) || 0) + 1);
+  }
+  const overall = Math.round((correctSum / Math.max(1, totalSum)) * 100);
+  const scored = [...byConcept.entries()].map(([k, v]) => ({ k, pct: v.correct / Math.max(1, v.total) }));
+  const weak = scored.filter(s => s.pct < 0.6).sort((a, b) => a.pct - b.pct).slice(0, 3).map(s => `${s.k} (${Math.round(s.pct * 100)}%)`);
+  const strong = scored.filter(s => s.pct >= 0.8).sort((a, b) => b.pct - a.pct).slice(0, 3).map(s => `${s.k} (${Math.round(s.pct * 100)}%)`);
+  const usualLevel = [...levelCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || 'unknown';
+  const lines = [
+    `Games played: ${list.length}. Overall accuracy: ${overall}%. Most-played level: ${usualLevel}.`,
+    weak.length ? `Weak spots (reinforce these): ${weak.join(', ')}.` : 'No clear weak spots yet.',
+    strong.length ? `Strong spots (can build beyond these): ${strong.join(', ')}.` : 'No clearly mastered areas yet.',
+    overall < 55 ? 'Guidance: ease difficulty and complexity, lean text-heavier for clarity.'
+      : overall > 80 ? 'Guidance: raise the challenge and rigor.'
+      : 'Guidance: keep a moderate challenge appropriate to the topic.'
+  ];
+  return lines.join('\n');
+}
+
 function summarizeLearnerVisualProfile(games = []) {
   const recent = Array.isArray(games) ? games.slice(-12) : [];
   if (!recent.length) return { avgScore: 0.65, lowConfidence: false, note: 'no prior history available' };
@@ -2405,20 +2439,27 @@ app.post('/api/ai/structured-explanation-suggest', auth, async (req, res) => {
   try {
     const games = await recentUserGames(req.user.username, 20);
     const interests = [...new Set(games.map(g => `${g.topic} / ${g.concept}`).filter(Boolean))].slice(-12);
+    const status = summarizeLearnerStatus(games);
     const result = await generateStructured([
       {
         role: 'system',
-        content: `Return JSON only with this schema:
+        content: `You suggest the next topic + settings for the "Structured Explanations" activity on this learning site.
+
+How this site teaches (respect it when choosing settings): every topic becomes an adaptive slide presentation. Each slide has explanatory paragraphs plus support material (LaTeX, tables, code, diagrams/SVG, or images) and one challenging multiple-choice question. When the learner answers, the NEXT slide is generated from that answer — a wrong answer is met with a slide that names the misconception and steers back on track; a right answer earns a deeper slide. Settings therefore shape a whole branching lesson, not a single card.
+
+Pick settings that fit BOTH the topic and this learner's status:
+- Symbol-heavy domains (math proofs, algorithms, physics) → exampleType "proof"/"worked-example", higher support material (LaTeX carries the reasoning), alternateVisualMath true.
+- Conceptual/humanities domains (history, biology, economics narrative) → exampleType "outline"/"graph-table", more text than support material ("mostly-text"), imagery used to illustrate rather than derive.
+- If the learner is scoring low on recent work, ease the level and complexity and lean text-heavier; if they are strong, raise the challenge.
+- Prefer a topic that builds on a weak spot or a fresh but related area they have NOT seen; avoid the "Avoid prompts".
+
+Return JSON only with this schema:
 {"prompt":string,"exampleType":"proof"|"worked-example"|"graph-table"|"tree-diagram"|"outline","level":"Beginner"|"Lower Intermediate"|"Upper Intermediate"|"Advanced"|"PhD","tone":string,"complexity":"simple"|"standard"|"scholarly","paragraphLength":"brief"|"medium"|"detailed","imageDensity":"text-only"|"mostly-text"|"balanced"|"mostly-visual","totalSlides":number,"continuation":"more-examples"|"different-examples"|"related-topics","alternateVisualMath":boolean}
-Rules:
-- Suggest one rigorous but teachable structured-explanation topic.
-- It may be math, science, economics, computing, or other structured reasoning domains.
-- Include settings that fit the topic and remain editable by the user.
 - Keep prompt concise and classroom-safe.`
       },
       {
         role: 'user',
-        content: `Learner recent interests:\n${interests.join('\n') || 'none yet'}\n\nAvoid prompts:\n${[...avoidSet].join('\n') || 'none'}`
+        content: `Learner recent interests:\n${interests.join('\n') || 'none yet'}\n\nLearner status data:\n${status}\n\nAvoid prompts:\n${[...avoidSet].join('\n') || 'none'}`
       }
     ], { temperature: 0.8, maxTokens: 700 });
 
