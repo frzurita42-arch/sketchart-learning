@@ -71,3 +71,59 @@ If Postgres is configured, these become local fallback/dev artifacts.
 | `data/generated/paths/*.json` | every AI-generated learning path |
 | `data/generated/slides/*.json` | every AI-generated slide, including unused prefetched branches |
 | `data/generated/recommendations/*.json` | every end-of-game AI recommendation |
+
+## Project structure
+
+The app is organized as small, single-concern modules — no build step. The backend
+uses CommonJS (`require`/`module.exports`); the frontend uses native ES modules
+(`import`/`export`) loaded from one `<script type="module">`.
+
+```
+sketchart-learning/
+├── server.js                       # thin bootstrap: wire config + db, mount routers, start
+├── src/                            # backend (CommonJS)
+│   ├── config.js                   # env loading, provider flags, secrets, shared constants
+│   ├── auth.js                     # token sign/verify + auth / adminOnly middleware
+│   ├── db/
+│   │   ├── pool.js                 # Postgres pool holder (db.pool), dbQuery, withDbTimeout
+│   │   ├── persistence.js          # file storage (readJSON/writeJSON), dirs, initDatabase, saveGeneration
+│   │   ├── users.js                # userState holder + load/persist users
+│   │   ├── games.js                # game-record CRUD (file or Postgres)
+│   │   └── caches.js               # suggested-topic + home-topic caches and their pick/rotate helpers
+│   ├── ai/
+│   │   ├── providers.js            # DeepSeek/Gemini text, structured JSON, images, Claude SVG
+│   │   └── prompts/*.js            # one file per AI prompt (slide, learning-path, coach, …)
+│   ├── slides/
+│   │   ├── sanitize.js             # sanitizeSvg / sanitizeComponents / componentVisualSignature
+│   │   ├── fallback.js             # offline fallback slide/lesson generators (pure)
+│   │   └── visual-policy.js        # adaptive visual mode + enforce* + learner summaries + image prompts
+│   └── routes/
+│       ├── auth.routes.js          # /api/login, /api/me, user management
+│       ├── games.routes.js         # /api/games*, /report/:shareId
+│       ├── ai.routes.js            # all /api/ai/* + /api/config + cache-refresh helpers
+│       └── static.routes.js        # cache-busted index.html + SPA catch-all
+└── public/
+    ├── index.html                  # single <script type="module" src="/js/main.js">
+    ├── css/sketch.css              # theme tokens + component styles
+    └── js/
+        ├── main.js                 # entry: expose window.nav, wire topbar, boot()
+        ├── core/
+        │   ├── state.js            # shared `state`, constants (LEVELS/TONES), $app/$topbar
+        │   ├── api.js              # fetch wrapper (API)
+        │   ├── util.js             # shuffled, withTimeout, hashText, downloadCsv
+        │   └── router.js           # nav/view switching, boot, demo-mode banner
+        ├── ui/                     # one file per slide-component renderer + index.js dispatcher
+        ├── activities/            # one file per home activity (render + bind + helpers)
+        │   ├── learning-path.js  suggested-topic.js  time-travel.js  structured-explanations.js
+        ├── flows/
+        │   └── path.js             # loadPath, viewPath, viewSettings
+        ├── game/
+        │   ├── engine.js           # startGame, prefetch, showSlide, answer, advance, finishGame
+        │   └── memory.js           # sessionStorage prefetch cache (memGet/Put/clear)
+        └── views/
+            └── login.js  home.js  stats.js  chat.js  dashboard.js
+```
+
+To change an AI prompt, edit its file in `src/ai/prompts/`. To change one activity's
+form or behavior, edit its file in `public/js/activities/`. To change a slide-component
+renderer, edit its file in `public/js/ui/`.
