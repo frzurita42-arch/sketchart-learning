@@ -101,7 +101,9 @@ export default function AppRoot() {
           >×</button>
         </div>
       )}
-      <main id="app" key={`${view}-${tick}`}>{views[view]}</main>
+      {/* key={view} remounts only on a view switch (fresh state per view, like
+          the legacy SPA); in-view rerender() updates in place. */}
+      <main id="app" key={view}>{views[view]}</main>
       <Footer />
     </AppContext.Provider>
   );

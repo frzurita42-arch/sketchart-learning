@@ -5,6 +5,10 @@ import '@/styles/sketch.css';
 export const metadata: Metadata = {
   title: 'SketchLearn — draw your own path',
   description: 'AI-drawn lessons that adapt to every answer you give.',
+  // The pencil favicon from the legacy public/index.html.
+  icons: {
+    icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='80' font-size='80'%3E%E2%9C%8F%EF%B8%8F%3C/text%3E%3C/svg%3E",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
