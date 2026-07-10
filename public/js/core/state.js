@@ -1,8 +1,9 @@
-/* Shared singletons: the app state object, constant pools, and the two root
+/* Shared singletons: the app state object, constant pools, and the root
  * DOM mounts. Every view/activity/flow imports what it needs from here. */
 
 export const $app = document.getElementById('app');
 export const $topbar = document.getElementById('topbar');
+export const $footer = document.getElementById('site-footer');
 
 export const PRESET_TOPICS = ['Math', 'Physics', 'Chemistry', 'Biology', 'History', 'Geography', 'Literature', 'Programming', 'Economics', 'Music Theory', 'Astronomy', 'Psychology'];
 export const LEVELS = ['Beginner', 'Lower Intermediate', 'Upper Intermediate', 'Advanced', 'PhD'];

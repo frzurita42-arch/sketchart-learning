@@ -142,12 +142,7 @@ function renderHomeFeed() {
     renderTimeTravelActivitySection(),
     renderStructuredExplanationsSection()
   ]);
-  return `${sections.join('')} ${renderHomeFooter()}`;
-}
-
-function renderHomeFooter() {
-  return `
-    <footer class="home-footer">
-      <p>SketchLearn · Adaptive learning cards powered by your goals and progress.</p>
-    </footer>`;
+  // The footer is now site-wide (see core/layout.js), so the home feed no longer
+  // renders its own.
+  return sections.join('');
 }

@@ -1,10 +1,11 @@
 /* Login view. */
 import { API } from '../core/api.js';
-import { $app, $topbar } from '../core/state.js';
+import { $app } from '../core/state.js';
+import { hideChrome } from '../core/layout.js';
 import { boot } from '../core/router.js';
 
 export function viewLogin() {
-  $topbar.classList.add('hidden');
+  hideChrome();
   $app.innerHTML = `
     <div class="auth-wrap">
       <div class="auth-logo"><h1>✏️ <span class="scribble-underline">SketchLearn</span></h1>

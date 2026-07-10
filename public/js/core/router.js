@@ -1,6 +1,7 @@
 /* Routing: view switching, boot, and the demo-mode banner. */
 import { API } from './api.js';
-import { state, $app, $topbar } from './state.js';
+import { state, $app } from './state.js';
+import { showChrome } from './layout.js';
 import { viewLogin } from '../views/login.js';
 import { viewHome } from '../views/home.js';
 import { viewPath, viewSettings } from '../flows/path.js';
@@ -19,7 +20,7 @@ export function nav(view) {
 
 export function boot() {
   if (!API.token) return viewLogin();
-  $topbar.classList.remove('hidden');
+  showChrome();
   document.getElementById('whoami').textContent = `☺ ${API.user.username}`;
   document.getElementById('nav-dashboard').classList.toggle('hidden', API.user.role !== 'admin');
   viewHome();

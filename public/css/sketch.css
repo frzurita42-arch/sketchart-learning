@@ -548,7 +548,7 @@ table.sketch tr:nth-child(even) td { background: #fffbe8; }
 @media (max-width: 340px) { .settings-compact { grid-template-columns: 1fr; } }
 
 /* ---------- home footer ---------- */
-.home-footer {
+.home-footer, .site-footer {
   max-width: 900px;
   margin: 28px auto 6px;
   text-align: center;
@@ -557,6 +557,9 @@ table.sketch tr:nth-child(even) td { background: #fffbe8; }
   border-top: 2px dashed var(--ink);
   padding-top: 12px;
 }
+/* the shared site-wide footer sits below #app; give it a little breathing room */
+.site-footer { margin: 34px auto 18px; padding-bottom: 6px; }
+.site-footer.hidden { display: none; }
 
 /* ---------- responsive ---------- */
 @media (max-width: 640px) {
