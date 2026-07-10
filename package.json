@@ -1,17 +1,31 @@
 {
-  "name": "sketchlearn",
-  "version": "1.0.0",
-  "description": "AI-powered adaptive learning slides with a hand-drawn sketch theme",
-  "main": "server.js",
+  "name": "sketchart-next",
+  "version": "2.0.0",
+  "private": true,
+  "description": "SketchLearn — AI-drawn adaptive learning slides (Next.js + TypeScript)",
   "scripts": {
-    "start": "node server.js"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "legacy": "node server.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=18.18"
   },
   "dependencies": {
-    "express": "^4.19.2",
-    "katex": "^0.16.47",
-    "pg": "^8.22.0"
+    "katex": "^0.16.11",
+    "next": "^15.5.0",
+    "pg": "^8.13.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/katex": "^0.16.7",
+    "@types/node": "^22.7.0",
+    "@types/pg": "^8.11.10",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.6.0"
   }
 }

@@ -2,3 +2,7 @@ node_modules/
 .env
 data/
 *.log
+
+# Next.js
+.next/
+next-env.d.ts
