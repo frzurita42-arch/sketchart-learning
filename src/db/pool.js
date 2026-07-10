@@ -19,7 +19,7 @@ const db = {
         // slow queries (e.g. a cold-starting free-tier DB) are bounded per-call by
         // withDbTimeout so the boot DDL is never killed mid-flight.
         max: 5,
-        connectionTimeoutMillis: 10000,
+        connectionTimeoutMillis: 5000,
         idleTimeoutMillis: 30000
       })
     : null
