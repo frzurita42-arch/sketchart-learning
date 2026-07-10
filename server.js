@@ -1237,7 +1237,13 @@ function makeFallbackSlide({ topic, concept, level, settings = {}, slideNumber, 
   const titleBase = String(concept || topic || 'Learning concept').trim();
   const title = titleBase.split(/\s+/).slice(0, 8).join(' ');
   const exampleType = String(settings.exampleType || '').toLowerCase();
-  const proofMode = exampleType === 'proof';
+  // LaTeX/proof behaviour only for genuinely mathematical topics — a language or
+  // humanities lesson must never get formulas even if the focus mode defaults to "proof".
+  const fbSubject = `${topic} ${concept}`.toLowerCase();
+  const fbMath = /math|physics|calculus|algebra|geometry|trigonometr|equation|formula|theorem|derivative|integral|matrix|vector|probabilit|statistic|arithmetic|number theory|\bproof\b|boolean|quantum|mechanics|thermodynam|chemistr|algorithm|computer science|cryptograph|data structure|linear algebra|differential|circuit/.test(fbSubject);
+  const fbLangHum = /french|spanish|english|german|italian|portuguese|mandarin|chinese|japanese|korean|arabic|latin|\blanguage\b|grammar|vocabular|conjugat|\bverb\b|\bnoun\b|\btense\b|pronunciat|spelling|history|geograph|\bart\b|music|literature|poetry|philosoph|\blaw\b|politic|culture|religion|anatomy|cooking|writing|essay/.test(fbSubject);
+  const fbAllowLatex = fbMath && !fbLangHum;
+  const proofMode = exampleType === 'proof' && fbAllowLatex;
   const adaptationLine = branch
     ? (branch.correct
       ? 'You answered correctly on the previous step, so this slide goes a level deeper.'
@@ -1277,9 +1283,6 @@ function makeFallbackSlide({ topic, concept, level, settings = {}, slideNumber, 
   // charts, tables, SVG diagrams and sticky notes — not one type repeated. Choice is
   // keyed to the subject and honors the support-material ratio (imageDensity).
   const density = settings.imageDensity || 'balanced';
-  const fbText = `${topic} ${concept}`.toLowerCase();
-  const fbStem = /math|physics|algorithm|statistic|data|calculus|algebra|probability|economics|finance|geometry|engineering|trig|matrix|vector|derivative|integral/.test(fbText);
-  const fbHumanities = /history|war|empire|revolution|ancient|civiliz|politic|philosoph|literature|art|culture|geograph|biolog|biograph|language|law|religion/.test(fbText);
   const shortConcept = String(concept || topic || 'the idea').trim().slice(0, 22);
   const escSvg = s => String(s || '').replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
 
@@ -1302,20 +1305,22 @@ function makeFallbackSlide({ topic, concept, level, settings = {}, slideNumber, 
     // sticky
     return {
       type: 'stickynote',
-      color: fbHumanities ? 'green' : (slideNumber % 2 ? 'blue' : 'orange'),
-      title: fbHumanities ? 'Remember' : 'Key idea',
-      note: fbHumanities
+      color: fbLangHum ? 'green' : (slideNumber % 2 ? 'blue' : 'orange'),
+      title: fbLangHum ? 'Remember' : 'Key idea',
+      note: fbLangHum
         ? `A vivid detail helps ${shortConcept} stick — tie a date, name, or place to a story you can retell.`
         : `Restate ${shortConcept} in one sentence before moving on; if you can predict an outcome with it, it has sunk in.`
     };
   };
 
   if (density !== 'text-only') {
+    // Non-mathematical topics never get a LaTeX slide; they lean on images, tables,
+    // svg diagrams and sticky notes instead.
     const cycle = proofMode
       ? ['latex', 'chart', 'latex', 'table', 'latex', 'sticky']
-      : fbHumanities
+      : fbLangHum
         ? ['sticky', 'table', 'svg', 'sticky', 'table', 'svg']
-        : fbStem
+        : fbAllowLatex
           ? ['chart', 'latex', 'table', 'svg', 'sticky', 'chart']
           : ['chart', 'table', 'sticky', 'svg', 'chart', 'table'];
     const idx = (Math.max(1, slideNumber) - 1) % cycle.length;
@@ -2758,21 +2763,30 @@ app.post('/api/ai/slide', auth, async (req, res) => {
   const subjectText = `${topic} ${concept}`.toLowerCase();
   const dataFocus = /statistic|data|economics|econ|demograph|market|survey|population|climate|trend|distribution|frequency|percentage|budget|finance|trade|gdp|growth rate|poll/.test(subjectText);
   const illustrativeFocus = /history|histor|war|revolution|empire|ancient|medieval|civiliz|politic|philosoph|literature|art|culture|religion|social|geograph|biograph|anecdote|language|law|ethics/.test(subjectText);
+  // Whether LaTeX/formulas make sense at all: only for genuinely mathematical/symbolic
+  // topics. A language, history or arts lesson must NEVER get LaTeX, even if the activity's
+  // focus mode defaults to "proof". This is what keeps a French grammar slide from turning
+  // into a formula or a bare logic list instead of real support material.
+  const mathTopic = /math|physics|calculus|algebra|geometry|trigonometr|equation|formula|theorem|derivative|integral|matrix|vector|probabilit|statistic|arithmetic|number theory|\bproof\b|logic gate|boolean|quantum|mechanics|thermodynam|chemistr|algorithm|computer science|cryptograph|data structure|linear algebra|differential|calculation|electr(o|ical)|circuit/i.test(subjectText);
+  const languageOrHumanities = /french|spanish|english|german|italian|portuguese|mandarin|chinese|japanese|korean|arabic|latin|\blanguage\b|grammar|vocabular|conjugat|\bverb\b|\bnoun\b|\btense\b|pronunciat|spelling|history|geograph|\bart\b|music|literature|poetry|philosoph|\blaw\b|politic|culture|religion|anatomy|cooking|writing|essay|social studies/i.test(subjectText);
+  const allowLatex = (stemFocus || mathTopic) && !languageOrHumanities;
+  // Proof/derivation behaviour only applies when the subject is actually mathematical.
+  const effectiveProof = proofMode && allowLatex;
   // Subject-aware guidance so the AI picks components on purpose, not at random.
-  const componentStrategy = stemFocus
+  const componentStrategy = allowLatex
     ? 'This is a technical/quantitative subject: reach first for LaTeX (formulas, derivations), then a chart (bar/line/scatter for relationships and trends) or a labelled svg diagram, and code when it is a computing topic. Use a sticky note only for a single crucial formula caveat or mnemonic.'
-    : illustrativeFocus
-      ? 'This is a conceptual/humanities subject: reach first for one or two sticky notes carrying a memorable anecdote, date, name, or key takeaway, plus a comparison table (e.g. before/after, cause/effect) or a timeline; use an image to evoke the period/place, and use charts only if there is genuine data (e.g. populations, dates, magnitudes). Avoid LaTeX/code unless the topic truly needs it.'
+    : (illustrativeFocus || languageOrHumanities)
+      ? 'This is a language/humanities/conceptual subject: do NOT use LaTeX or formulas at all. Reach for a generated IMAGE to illustrate, a TABLE (e.g. conjugation/comparison/before-after/timeline), an SVG diagram for structure or relationships, and sticky notes for a rule, example, mnemonic, or anecdote. Every slide must carry at least one such support component — never a bare list of generic steps with no visual.'
       : dataFocus
-        ? 'This is a data-driven subject: reach first for a chart that fits the data\'s job — bar for comparing categories, line for change over time, pie for parts of a whole, scatter/bubble for relationships — with a sticky note or table calling out the single most important reading. Only invent numbers that are realistic and clearly illustrative.'
-        : 'Pick the one or two components that most clarify THIS concept: a chart for quantities/relationships, a table for structured comparisons, a sticky note for a highlight or warning, latex for symbolic reasoning, an svg diagram for structure/flow, or an image to illustrate. Do not add a component that does not earn its place.';
+        ? 'This is a data-driven subject: reach first for a chart that fits the data\'s job — bar for comparing categories, line for change over time, pie for parts of a whole, scatter/bubble for relationships — with a sticky note or table calling out the single most important reading. Do NOT use LaTeX for non-mathematical points. Only invent numbers that are realistic and clearly illustrative.'
+        : 'Pick the one or two components that most clarify THIS concept: an image or svg diagram to illustrate, a table for structured comparisons, a chart for quantities/relationships, a sticky note for a highlight. Use LaTeX ONLY if the concept is genuinely mathematical. Never leave a slide as a bare list of generic steps with no support component.';
   const visualPlan = decideAdaptiveVisualMode({
     topic,
     concept,
     settings,
-    proofMode,
+    proofMode: effectiveProof,
     isTimeTravelActivity,
-    stemFocus,
+    stemFocus: allowLatex,
     learnerProfile
   });
   const canGenerateImage = visualPlan.allowImages;
@@ -2829,15 +2843,18 @@ Rules:
 - If a code snippet is included: ${codeDepth} Include clear inline comments that explain non-obvious lines and decisions.
 - If a LaTeX formula/proof block is included: ${equationDepth} Follow it with explanatory text that walks through the symbols and logic step-by-step.
 - If a LaTeX formula/proof block is included: ${equationDepth} Put the whole proof on the same slide in one displayed block when possible. Use short comments on the right of each line with aligned LaTeX, not separate captions or paragraphs that compete with the formula.
-- If the concept is mathematical or another topic where symbols clarify the reasoning, prefer a displayed LaTeX derivation even if the example is not explicitly a formal proof.
+- SUBJECT GATE FOR LATEX (hard rule): ${allowLatex
+  ? 'This concept is mathematical/technical, so LaTeX formulas and derivations are appropriate where symbols clarify the reasoning.'
+  : 'This concept is NOT mathematical (e.g. a language, history, art or other humanities topic). Do NOT use LaTeX, formulas, equations or symbolic notation anywhere — not even to lay out generic "logical steps". Never render a slide as a bare list of generic steps. Instead teach with prose PLUS real support material: a generated image, a table (conjugations, comparisons, timelines), an SVG diagram, a chart when there is real data, and sticky notes for rules/examples/mnemonics/anecdotes.'}
+- ${allowLatex ? 'If the concept is mathematical or another topic where symbols clarify the reasoning, prefer a displayed LaTeX derivation even if the example is not explicitly a formal proof.' : 'Do not use LaTeX for this topic.'}
 - Across slides, vary representation naturally: include some text-only consolidation slides when a repeated formula would add little, and use formula slides only when symbols clarify a new step.
 - Never repeat the exact same displayed LaTeX block on consecutive slides; continue by adding or refining a different step.
 - REPRESENTATION VARIETY (important): do NOT make the presentation LaTeX-only. LaTeX is for symbolic reasoning, but across the slides you must also use OTHER component types where they explain better — a chart for quantities/trends/relationships, a table for structured comparisons, an svg diagram for structure/flow, and a sticky note for a highlight or common mistake. Aim for at least one non-LaTeX support component every couple of slides; a slide whose idea is best shown as a graph or diagram should use that, not a formula. Note: LaTeX here renders with KaTeX (math only) — it CANNOT draw TikZ/PGFPlots graphics, so use the "chart" or "svg" component for any plot or diagram.
 - IMAGE POLICY (adaptive): ${visualPlan.promptRule}
 - If including an image component, use a precise educational prompt that names the concept and the exact element to visualize. Avoid decorative prompts.
 - Any formula/proof/code explanation should be as substantial as the selected paragraph length setting; avoid tiny token examples for long-form settings.
-- ${stemFocus ? `${stemAlternation} For this STEM-heavy concept, include either a code snippet or a LaTeX formula/proof block, plus textual explanation tying them together. If the topic naturally benefits from symbolic math, prefer a proof/derivation page.` : 'Use STEM-style formula/code components only when they naturally fit the concept.'}
-- ${proofMode ? 'PROOF MODE: maintain proof continuity across slides. Use displayed LaTeX on most slides, but allow occasional text-only consolidation when it prevents repeating the same formula block. Continue by advancing or repairing one step at a time.' : ''}
+- ${allowLatex ? `${stemAlternation} For this STEM-heavy concept, include either a code snippet or a LaTeX formula/proof block, plus textual explanation tying them together. If the topic naturally benefits from symbolic math, prefer a proof/derivation page.` : 'Do NOT use LaTeX or code to explain this non-technical concept; use images, tables, svg diagrams and sticky notes instead.'}
+- ${effectiveProof ? 'PROOF MODE: maintain proof continuity across slides. Use displayed LaTeX on most slides, but allow occasional text-only consolidation when it prevents repeating the same formula block. Continue by advancing or repairing one step at a time.' : ''}
 - ${isTimeTravelActivity
   ? 'This is a Time Travel activity slide: keep the explanation timeline-aware and use a table only if it genuinely clarifies the progression.'
   : "For non-time-travel activities, keep the explanation tied to the concept and the learner's previous answer."}
@@ -2862,7 +2879,7 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
   if (!geminiEnabled && !deepseekEnabled) {
     const slide = makeFallbackSlide({ topic, concept, level, settings, slideNumber, totalSlides, branch });
     slide.components = sanitizeComponents(slide.components);
-    enforceLatexNarrativeCadence(slide, { topic, concept, slideNumber, proofMode, stemFocus, history, branch });
+    enforceLatexNarrativeCadence(slide, { topic, concept, slideNumber, proofMode: effectiveProof, stemFocus: allowLatex, history, branch });
     if (isTimeTravelActivity && visualPlan.allowImages) {
       enforceTimeTravelImagePolicy(slide, { topic, concept, slideNumber, totalSlides, customInstructions: settings.customInstructions || '' });
     } else if (visualPlan.allowImages && !slide.components.some(c => c?.type === 'image')) {
@@ -2904,7 +2921,7 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
   try {
     const slide = await generateStructured([{ role: 'system', content: system }, { role: 'user', content: user }], { temperature: 0.85, maxTokens: 8192 });
     slide.components = sanitizeComponents(slide.components);
-    enforceLatexNarrativeCadence(slide, { topic, concept, slideNumber, proofMode, stemFocus, history, branch });
+    enforceLatexNarrativeCadence(slide, { topic, concept, slideNumber, proofMode: effectiveProof, stemFocus: allowLatex, history, branch });
     if (!visualPlan.allowImages) {
       slide.components = (slide.components || []).filter(c => c?.type !== 'image' && c?.type !== 'svg');
     }
@@ -2918,10 +2935,14 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
         caption: `Concept illustration: ${String(slide.title || concept).slice(0, 80)}`
       });
     }
-    if (settings.imageDensity === 'text-only' && !proofMode) {
+    if (settings.imageDensity === 'text-only' && !effectiveProof) {
       slide.components = slide.components.filter(c => !['latex', 'code', 'table', 'chart'].includes(c.type));
     }
-    if (proofMode && slideNumber % 4 !== 0 && !slide.components.some(c => c?.type === 'latex')) {
+    // If the topic is not mathematical, strip any LaTeX the model added anyway.
+    if (!allowLatex) {
+      slide.components = (slide.components || []).filter(c => c?.type !== 'latex');
+    }
+    if (effectiveProof && slideNumber % 4 !== 0 && !slide.components.some(c => c?.type === 'latex')) {
       slide.components.unshift({
         type: 'latex',
         content: makeFallbackProofLatex({ topic, concept, slideNumber, branch }),
