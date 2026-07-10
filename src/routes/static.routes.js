@@ -11,7 +11,7 @@ const PUBLIC_DIR = path.join(ROOT_DIR, 'public');
 // Cache-busting: append a content-hash version to local asset URLs so a new deploy
 // always loads fresh CSS/JS instead of a browser/CDN-cached copy. The version changes
 // only when one of these files changes, so caching still works between deploys.
-const VERSIONED_ASSETS = ['/css/sketch.css', '/js/app.js'];
+const VERSIONED_ASSETS = ['/css/sketch.css', '/js/main.js'];
 const ASSET_VERSION = (() => {
   try {
     const h = crypto.createHash('sha1');
