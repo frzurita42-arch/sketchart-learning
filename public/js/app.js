@@ -1276,6 +1276,7 @@ function enforceGraphOnlyClient(slide, game) {
 
 function showSlide(slide) {
   const g = state.game;
+  window.scrollTo(0, 0); // start each slide at the top so the user reads top-to-bottom
   slide = enforceGraphOnlyClient(slide, g);
   // shuffle option order so the correct answer isn't always in the same slot;
   // done once here, before both rendering and prefetch, so indices stay aligned
@@ -1307,16 +1308,17 @@ function showSlide(slide) {
 
   startTimerDisplay();
 
-  // ---- prefetch: generate the next slide for EVERY option now, so it's
-  // already loaded the moment the learner picks one ----
+  // ---- prefetch: generate the next slide for EVERY option now, in the background,
+  // so the moment the learner picks one it is already loaded (no wait, no spinner) ----
   g.prefetch = null;
+  g.prefetchReady = {}; // idx -> resolved slide, for instant display without a loading flash
   if (g.slideNumber < g.settings.totalSlides) {
-    g.prefetch = slide.quiz.options.map((o) => {
+    g.prefetch = slide.quiz.options.map((o, i) => {
       const branch = branchFor(slide, o);
       const cached = memGetSlide(g.id, g.slideNumber + 1, branch.chosenText);
       const promise = cached ? Promise.resolve(cached) : requestSlide(branch, g.slideNumber + 1);
-      // store each resolved branch in browser memory so re-picks/reloads reuse it
-      promise.then(s => memPutSlide(g.id, g.slideNumber + 1, branch.chosenText, s)).catch(() => { });
+      // remember resolved value + store in browser memory so re-picks/reloads reuse it
+      promise.then(s => { g.prefetchReady[i] = s; memPutSlide(g.id, g.slideNumber + 1, branch.chosenText, s); }).catch(() => { });
       return promise;
     });
   }
@@ -1398,19 +1400,23 @@ function answer(idx) {
 
 async function advance(idx, branch) {
   const g = state.game;
-  $app.innerHTML = loadingHTML('Turning the page…');
   try {
-    let slide;
-    try {
-      slide = await g.prefetch[idx]; // usually already resolved
-    } catch {
-      // prefetch failed → reuse browser memory if present, else retry live
-      slide = memGetSlide(g.id, g.slideNumber + 1, branch.chosenText)
-        || await requestSlide(branch, g.slideNumber + 1);
+    // If this branch's slide already finished loading in the background, show it
+    // instantly with no spinner; otherwise show the loader only while we wait.
+    let slide = (g.prefetchReady && g.prefetchReady[idx]) || null;
+    if (!slide) {
+      window.scrollTo(0, 0);
+      $app.innerHTML = loadingHTML('Turning the page…');
+      try {
+        slide = await g.prefetch[idx];
+      } catch {
+        slide = memGetSlide(g.id, g.slideNumber + 1, branch.chosenText)
+          || await requestSlide(branch, g.slideNumber + 1);
+      }
     }
     memPutSlide(g.id, g.slideNumber + 1, branch.chosenText, slide);
     g.slideNumber++;
-    showSlide(slide);
+    showSlide(slide); // scrolls to top itself
   } catch (e) { gameError(e, () => advance(idx, branch)); }
 }
 

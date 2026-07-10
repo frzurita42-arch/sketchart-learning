@@ -319,28 +319,41 @@ async function persistUsers(nextUsers) {
 
 async function readGames() {
   if (!pgPool) return readJSON('games.json', []);
-  const { rows } = await dbQuery('SELECT * FROM games ORDER BY finished_at ASC');
-  return rows.map(r => ({
-    id: r.id,
-    shareId: r.share_id,
-    shareUrl: r.share_url,
-    username: r.username,
-    finishedAt: new Date(r.finished_at).toISOString(),
-    finishedDate: r.finished_date,
-    finishedTime: r.finished_time,
-    topic: r.topic,
-    concept: r.concept,
-    level: r.level,
-    settings: r.settings,
-    slides: r.slides,
-    correct: r.correct,
-    total: r.total,
-    durationSec: r.duration_sec,
-    recommendations: r.recommendations,
-    questionSummary: r.question_summary,
-    answerSummary: r.answer_summary,
-    aiNotes: r.ai_notes
-  }));
+  let dbGames = [];
+  try {
+    const { rows } = await withDbTimeout(dbQuery('SELECT * FROM games ORDER BY finished_at ASC'), 8000, 'Read games');
+    dbGames = rows.map(r => ({
+      id: r.id,
+      shareId: r.share_id,
+      shareUrl: r.share_url,
+      username: r.username,
+      finishedAt: new Date(r.finished_at).toISOString(),
+      finishedDate: r.finished_date,
+      finishedTime: r.finished_time,
+      topic: r.topic,
+      concept: r.concept,
+      level: r.level,
+      settings: r.settings,
+      slides: r.slides,
+      correct: r.correct,
+      total: r.total,
+      durationSec: r.duration_sec,
+      recommendations: r.recommendations,
+      questionSummary: r.question_summary,
+      answerSummary: r.answer_summary,
+      aiNotes: r.ai_notes
+    }));
+  } catch (e) {
+    console.error('DB read for games failed; falling back to file records:', e.message);
+  }
+  // Merge any records saved to the file fallback (e.g. when a DB write timed out),
+  // so a finished game is never missing from My Stats just because the DB was slow.
+  const fileGames = readJSON('games.json', []);
+  if (!Array.isArray(fileGames) || !fileGames.length) return dbGames;
+  const seen = new Set(dbGames.map(g => g.id));
+  const merged = dbGames.concat(fileGames.filter(g => g && g.id && !seen.has(g.id)));
+  merged.sort((a, b) => new Date(a.finishedAt || 0) - new Date(b.finishedAt || 0));
+  return merged;
 }
 
 function insertGameFile(record) {
@@ -1316,39 +1329,45 @@ function makeFallbackSlide({ topic, concept, level, settings = {}, slideNumber, 
     }
   }
 
+  // Rotate through nuanced question forms whose options are parallel in length and
+  // tone, so the answer isn't telegraphed (as close to "challenging" as an offline
+  // template can get; real AI produces concept-specific questions).
+  const quizVariants = [
+    {
+      question: `Applying ${shortConcept}: which conclusion follows ONLY when its key assumption actually holds?`,
+      options: [
+        { text: 'The result holds within its stated conditions and fails once they are violated', correct: true, explanation: 'Right — the conclusion is conditional on the assumption, so it breaks when the assumption does.', misconception: '' },
+        { text: 'The result always holds, because the assumption is just a technicality', correct: false, explanation: 'Over-generalization: the assumption is what makes the result valid, not a formality.', misconception: 'Treats a load-bearing assumption as optional' },
+        { text: 'The result never applies in practice, so the assumption is irrelevant', correct: false, explanation: 'Too dismissive: it applies precisely where the assumption is approximately true.', misconception: 'Discards a tool instead of scoping it' },
+        { text: 'The assumption and the result are independent of each other', correct: false, explanation: 'They are linked: the result is derived from the assumption.', misconception: 'Misses the dependency between premise and conclusion' }
+      ]
+    },
+    {
+      question: `Which statement about ${shortConcept} gets the direction of cause and effect right?`,
+      options: [
+        { text: 'A change in the driver shifts the outcome, not the other way around', correct: true, explanation: 'Correct — the causal arrow runs from driver to outcome here.', misconception: '' },
+        { text: 'The outcome determines the driver', correct: false, explanation: 'That reverses the causal direction.', misconception: 'Flips cause and effect' },
+        { text: 'They rise and fall together, so either one causes the other', correct: false, explanation: 'Correlation alone does not fix a direction.', misconception: 'Confuses correlation with causation' },
+        { text: 'Neither affects the other; both are fixed independently', correct: false, explanation: 'They are related, not independent.', misconception: 'Denies a real relationship' }
+      ]
+    },
+    {
+      question: `Where is ${shortConcept} MOST likely to break down?`,
+      options: [
+        { text: 'At the edges, where its assumptions stop being approximately true', correct: true, explanation: 'Right — models fail where their premises no longer hold.', misconception: '' },
+        { text: 'In the simplest textbook case it was designed for', correct: false, explanation: 'That is exactly where it works best.', misconception: 'Inverts where a model is reliable' },
+        { text: 'Only when the numbers involved are large', correct: false, explanation: 'Scale alone is not the failure point.', misconception: 'Picks an arbitrary trigger' },
+        { text: 'Never — a correctly stated idea cannot break down', correct: false, explanation: 'Every model has a domain of validity.', misconception: 'Overconfidence in universal validity' }
+      ]
+    }
+  ];
+  const quiz = quizVariants[(Math.max(1, slideNumber) - 1) % quizVariants.length];
+
   return {
     title,
     summary: `Fallback slide ${slideNumber}/${totalSlides} reinforcing ${concept} at ${level} level while AI providers are unavailable.`,
     components,
-    quiz: {
-      question: `Which strategy best shows real understanding of ${concept}?`,
-      options: [
-        {
-          text: 'Apply the concept to a new scenario and justify assumptions',
-          correct: true,
-          explanation: 'Correct. Transfer to a new case with explicit assumptions shows durable understanding.',
-          misconception: ''
-        },
-        {
-          text: 'Memorize terms without testing them in context',
-          correct: false,
-          explanation: 'Definitions help, but context-free memorization usually breaks under variation.',
-          misconception: 'Assumes recall is the same as understanding'
-        },
-        {
-          text: 'Skip constraints and focus only on ideal outcomes',
-          correct: false,
-          explanation: 'Ignoring constraints leads to unrealistic conclusions and weak decisions.',
-          misconception: 'Treats simplified models as complete reality'
-        },
-        {
-          text: 'Pick the first plausible interpretation and move on',
-          correct: false,
-          explanation: 'Fast intuition is useful, but untested interpretations often hide errors.',
-          misconception: 'Confuses plausibility with verification'
-        }
-      ]
-    }
+    quiz
   };
 }
 
@@ -2798,6 +2817,7 @@ app.post('/api/ai/slide', auth, async (req, res) => {
 Rules:
 - Exactly 4 quiz options, exactly ONE with "correct": true, shuffled position.
 - Make the quiz genuinely CHALLENGING, not obvious: every option must be on-topic and plausible to someone who only half-understood the slide. Never make the correct answer the conspicuously longest or most detailed, and never make wrong options absurd or off-topic. Each wrong option is a common, tempting mistake that reveals a DIFFERENT misconception. A careless reader should be able to fall for a distractor; only careful reasoning from the slide's paragraphs should yield the right answer.
+- QUIZ DIFFICULTY (enforce hard): the answer must NOT be guessable from wording alone. Make all four options similar in length, specificity, tone and vocabulary — no option should stand out as "the textbook one." Do NOT reuse the slide's exact phrasing in the correct answer; paraphrase it, and echo the slide's keywords in the distractors too. Every distractor must be true-sounding and at least partly correct, failing only on a precise point (a swapped cause/effect, a wrong condition or bound, a right idea applied to the wrong case, a subtle over-generalization). Avoid joke/filler options like "memorize without understanding" or "ignore the constraints". Prefer questions that require APPLYING the concept to a new specific case or picking the one correct statement among four nuanced claims, rather than asking which generic study strategy is best. A knowledgeable learner should have to think; a skimmer should be genuinely tempted by a distractor.
 - LENGTH: the slide MUST contain exactly ${paraCount} distinct paragraph(s) of prose (as separate "text" components), each about ${paragraphWords} words. Do not collapse them, and do not pad — each paragraph carries new substance. ${densityRule}
 - COHESION: the paragraphs must build on one another in order — introduce the idea, develop it, then apply or consolidate it — never restating the same point. The slide must also connect to the previous slides (briefly recall or build on them) and set up what comes next, so the whole presentation reads as one continuous, complementary lesson rather than isolated cards.
 - COMPONENT STRATEGY: choose support components deliberately to fit the subject and this specific concept — never scatter them at random, and never add one that does not clarify the idea. ${componentStrategy} Place the most important visual near the point it explains, and order components so the slide reads top-to-bottom as a single argument.
