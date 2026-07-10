@@ -1,5 +1,5 @@
-/* Thin fetch wrapper with auth token */
-const API = {
+// Thin fetch wrapper with the signed-token session. Exported for ES-module imports.
+export const API = {
   token: localStorage.getItem('sl_token') || null,
   user: JSON.parse(localStorage.getItem('sl_user') || 'null'),
 

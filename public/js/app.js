@@ -1,4 +1,7 @@
-/* SketchLearn SPA */
+/* SketchLearn SPA (ES module) */
+import { API } from './core/api.js';
+import { esc, renderComponents, loadingHTML } from './ui/index.js';
+
 const $app = document.getElementById('app');
 const $topbar = document.getElementById('topbar');
 
@@ -71,6 +74,9 @@ function nav(view) {
   (views[view] || viewHome)();
   window.scrollTo(0, 0);
 }
+// Inline onclick="nav(...)" handlers in rendered HTML need nav on the global scope
+// (module top-level names are not global).
+window.nav = nav;
 
 document.querySelectorAll('[data-nav]').forEach(b => b.addEventListener('click', () => nav(b.dataset.nav)));
 document.getElementById('logout-btn').addEventListener('click', async () => {

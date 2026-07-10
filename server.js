@@ -788,14 +788,21 @@ function verifyAuthToken(token) {
 const app = express();
 app.use(express.json({ limit: '2mb' }));
 // Don't let express.static auto-serve index.html — we serve a cache-busted copy below.
-app.use(express.static(path.join(__dirname, 'public'), { index: false }));
+// JS/CSS get Cache-Control: no-cache so ES-module imports (which bypass the index
+// ?v= rewrite) always revalidate after a deploy; ETag makes that a cheap 304.
+app.use(express.static(path.join(__dirname, 'public'), {
+  index: false,
+  setHeaders(res, filePath) {
+    if (/\.(?:js|css)$/i.test(filePath)) res.setHeader('Cache-Control', 'no-cache');
+  }
+}));
 // serve the vendored KaTeX build (CSS, JS, fonts) for offline LaTeX rendering
 app.use('/vendor/katex', express.static(path.join(__dirname, 'node_modules', 'katex', 'dist')));
 
 // Cache-busting: append a content-hash version to local asset URLs so a new deploy
 // always loads fresh CSS/JS instead of a browser/CDN-cached copy. The version changes
 // only when one of these files changes, so caching still works between deploys.
-const VERSIONED_ASSETS = ['/css/sketch.css', '/js/api.js', '/js/components.js', '/js/app.js'];
+const VERSIONED_ASSETS = ['/css/sketch.css', '/js/app.js'];
 const ASSET_VERSION = (() => {
   try {
     const h = crypto.createHash('sha1');
