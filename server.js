@@ -3122,21 +3122,34 @@ async function bootstrapPersistence() {
   }
 }
 
-async function startServer() {
-  await bootstrapPersistence();
-  app.listen(PORT, () => {
-    console.log(`SketchLearn running on http://localhost:${PORT}`);
-    console.log(`Persistence: ${pgPool ? 'Postgres' : 'JSON files'}`);
-    console.log(`Lesson text: ${geminiEnabled ? `Gemini (${GEMINI_TEXT_MODEL})${deepseekEnabled ? ' with DeepSeek failover' : ''}` : 'DeepSeek'}`);
-    const illus = claudeSvgEnabled ? `Claude SVG (${ANTHROPIC_MODEL})`
-      : (IMAGE_API_KEY ? `AI images (${IMAGE_API_MODEL})`
-        : (geminiEnabled ? `AI images (${GEMINI_IMAGE_MODEL})` : "the text model's own SVG"));
-    console.log(`Slide illustrations: ${illus}`);
-    if (!geminiEnabled && !deepseekEnabled) console.warn('WARNING: no text provider set — set GEMINI_API_KEY or DEEPSEEK_API_KEY in .env. AI features will fail.');
+// One-time persistence bootstrap, memoized so it runs exactly once per process.
+// On a long-running server it runs at boot; on a serverless platform (Vercel)
+// each cold-started function awaits it before handling its first request.
+let readyPromise = null;
+function ready() {
+  if (!readyPromise) readyPromise = bootstrapPersistence();
+  return readyPromise;
+}
+
+if (require.main === module) {
+  // Started directly (`node server.js` / `npm start`): bootstrap, then listen.
+  ready().then(() => {
+    app.listen(PORT, () => {
+      console.log(`SketchLearn running on http://localhost:${PORT}`);
+      console.log(`Persistence: ${pgPool ? 'Postgres' : 'JSON files'}`);
+      console.log(`Lesson text: ${geminiEnabled ? `Gemini (${GEMINI_TEXT_MODEL})${deepseekEnabled ? ' with DeepSeek failover' : ''}` : 'DeepSeek'}`);
+      const illus = claudeSvgEnabled ? `Claude SVG (${ANTHROPIC_MODEL})`
+        : (IMAGE_API_KEY ? `AI images (${IMAGE_API_MODEL})`
+          : (geminiEnabled ? `AI images (${GEMINI_IMAGE_MODEL})` : "the text model's own SVG"));
+      console.log(`Slide illustrations: ${illus}`);
+      if (!geminiEnabled && !deepseekEnabled) console.warn('WARNING: no text provider set — set GEMINI_API_KEY or DEEPSEEK_API_KEY in .env. AI features will fail.');
+    });
+  }).catch((e) => {
+    console.error('Failed to start SketchLearn:', e.message);
+    process.exit(1);
   });
 }
 
-startServer().catch((e) => {
-  console.error('Failed to start SketchLearn:', e.message);
-  process.exit(1);
-});
+// Exported for the serverless entry (api/index.js) to reuse the same Express
+// app + memoized bootstrap without opening a listening socket.
+module.exports = { app, ready };
