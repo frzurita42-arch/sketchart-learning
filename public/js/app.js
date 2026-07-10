@@ -284,12 +284,16 @@ function renderInstructionPlank(html) {
 }
 
 function renderHomeFeed() {
-  const sections = shuffled([
+  // "Start a Learning path" is the welcome activity — always pinned first.
+  // The remaining activities are shuffled so the feed still feels fresh.
+  const sections = [
     renderLearningPathSection(),
-    renderSuggestedTopicSection(),
-    renderTimeTravelActivitySection(),
-    renderStructuredExplanationsSection()
-  ]);
+    ...shuffled([
+      renderSuggestedTopicSection(),
+      renderTimeTravelActivitySection(),
+      renderStructuredExplanationsSection()
+    ])
+  ];
   return `${sections.join('')} ${renderHomeFooter()}`;
 }
 
