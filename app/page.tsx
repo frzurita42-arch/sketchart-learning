@@ -1,12 +1,7 @@
-// Placeholder home page for the Next.js scaffold. Replaced by the real home view
-// (activities feed) in Phase D.
-export default function HomePage() {
-  return (
-    <main id="app">
-      <h1 className="view-title">
-        ✏️ <span className="scribble-underline">SketchLearn</span>
-      </h1>
-      <p className="view-sub">Next.js migration scaffold — build is green.</p>
-    </main>
-  );
+import AppRoot from '@/components/AppRoot';
+
+// The whole SketchLearn SPA lives in this one client-managed shell, mirroring
+// the legacy in-memory view switching (public/js/main.js + core/router.js).
+export default function Page() {
+  return <AppRoot />;
 }
