@@ -1,6 +1,7 @@
 'use client';
-/* Home view: the activity feed. Renders the four activity cards in a shuffled
- * order and warms the topic/suggestion caches. Ported from public/js/views/home.js. */
+/* Home view: the activity feed. "Start a Learning path" (index 0) is pinned first
+ * as the welcome activity; the other three activity cards render in a shuffled
+ * order. Warms the topic/suggestion caches. Ported from public/js/views/home.js. */
 import { useEffect, useState } from 'react';
 import { API } from '@/lib/api';
 import { appState, PRESET_TOPICS } from '@/lib/app-state';
@@ -17,7 +18,7 @@ export function HomeView() {
   const app = useApp();
   // Seed the chip pool once for this home mount (matches legacy viewHome()).
   useState(() => { appState.homeTopics = shuffled(PRESET_TOPICS); return null; });
-  const [order, setOrder] = useState<number[]>(() => shuffled([0, 1, 2, 3]));
+  const [order, setOrder] = useState<number[]>(() => [0, ...shuffled([1, 2, 3])]);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,7 +43,7 @@ export function HomeView() {
       <h1 className="view-title">What do you want to <span className="scribble-underline">learn</span> today?</h1>
       <p className="view-sub">Pick a subject, or write your own.</p>
       <div className="slide-actions" style={{ justifyContent: 'center', margin: '10px 0 10px', borderTop: '3px dashed var(--ink)', paddingTop: 14 }}>
-        <button className="btn small" id="refresh-home-feed" onClick={() => setOrder(shuffled([0, 1, 2, 3]))}>↻ Refresh feed</button>
+        <button className="btn small" id="refresh-home-feed" onClick={() => setOrder([0, ...shuffled([1, 2, 3])])}>↻ Refresh feed</button>
       </div>
       {order.map(i => {
         const Section = SECTIONS[i];
