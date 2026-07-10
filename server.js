@@ -5,6 +5,18 @@ const path = require('path');
 const crypto = require('crypto');
 const { Pool } = require('pg');
 
+// ---------- AI prompt builders (one file per prompt; edit prompts there) ----------
+const { buildLearningPathPrompt } = require('./src/ai/prompts/learning-path');
+const { buildHomeTopicPoolPrompt } = require('./src/ai/prompts/home-topics');
+const { buildSuggestedTopicPrompt } = require('./src/ai/prompts/suggested-topic');
+const { buildTimeTravelHeadlinePrompt } = require('./src/ai/prompts/time-travel-headline');
+const { buildStructuredSuggestPrompt } = require('./src/ai/prompts/structured-suggest');
+const { buildLevelRefreshPrompt } = require('./src/ai/prompts/level-refresh');
+const { buildRecommendPrompt, buildCoachChatSystem } = require('./src/ai/prompts/coach');
+const {
+  buildSlideSystemPrompt, buildSlideHistoryText, buildSlideBranchText, buildSlideUserPrompt
+} = require('./src/ai/prompts/slide');
+
 // ---------- tiny .env loader (no dependency needed) ----------
 const envPath = path.join(__dirname, '.env');
 if (fs.existsSync(envPath)) {
@@ -2327,18 +2339,10 @@ app.post('/api/ai/path', auth, async (req, res) => {
       const fallback = makeFallbackLearningPath(topic, wanted);
       return res.json({ ...fallback, fallback: true });
     }
+    const lp = buildLearningPathPrompt({ wanted, topic, guidance, historyLine, freshSeed });
     const result = await generateStructured([
-      {
-        role: 'system',
-        content: `You are a curriculum designer. Given a study topic, produce a learning path as JSON with this exact schema:
-{"topic": string, "overview": string (2 sentences max), "levels": [{"level": string, "description": string (1 sentence), "concepts": [{"name": string, "blurb": string (max 15 words)}]}]}
-Include ONLY these levels, in this order: ${wanted.join(', ')}. Give 4-6 concrete, teachable concepts per level, ordered from first-to-learn to last. Respond with JSON only.`
-      },
-      {
-        role: 'user',
-        content: `Topic: ${topic}` + (guidance ? `\nLearner guidance/request (adapt the path to this): ${guidance}` : '') + historyLine +
-          (freshSeed ? `\n(Offer a genuinely fresh selection of concepts this time — vary them from a typical default. Variation token: ${freshSeed}.)` : '')
-      }
+      { role: 'system', content: lp.system },
+      { role: 'user', content: lp.user }
     ], { temperature: fromHistory || freshSeed ? 0.95 : 0.7, maxTokens: 4096 });
     const id = crypto.randomUUID();
     saveGeneration('paths', id, { username: req.user.username, topic, guidance, result, createdAt: new Date().toISOString() });
@@ -2354,21 +2358,10 @@ async function generateHomeTopicPoolForUser(username, { avoid = [], triggerTopic
   const avoidList = Array.isArray(avoid) ? avoid.map(String).filter(Boolean).slice(0, 50) : [];
   const wantedPool = Math.min(36, Math.max(18, parseInt(poolSize, 10) || 24));
 
+  const htp = buildHomeTopicPoolPrompt({ wantedPool, triggerTopic, learned, trendSeeds: GLOBAL_TREND_SEEDS, avoidList });
   const result = await generateStructured([
-    {
-      role: 'system',
-      content: `Return JSON only:
-{"topics":[{"name":string,"why":string}]}
-Rules:
-- Exactly ${wantedPool} topics.
-- Blend learner interests with current global trends.
-- Favor practical, problem-solving learning themes.
-- Topic names must be short, classroom-safe, and distinct.`
-    },
-    {
-      role: 'user',
-      content: `Trigger topic from home interaction (if any): ${triggerTopic || 'none'}\n\nLearner recent studies:\n${learned.join('\n') || 'none yet'}\n\nCurrent trend seeds:\n${GLOBAL_TREND_SEEDS.join('\n')}\n\nAvoid these topic names:\n${avoidList.join('\n') || 'none'}`
-    }
+    { role: 'system', content: htp.system },
+    { role: 'user', content: htp.user }
   ], { temperature: 0.74, maxTokens: 2200 });
 
   return normalizeTopicPool((result.topics || []).map(t => t.name), DEFAULT_HOME_TOPIC_POOL);
@@ -2455,24 +2448,10 @@ async function generateSuggestedPairForUser(username, { avoidTopics = [], trigge
   const avoidSet = new Set((Array.isArray(avoidTopics) ? avoidTopics : []).map(v => String(v || '').trim().toLowerCase()).filter(Boolean));
   const fallbackPair = makeFallbackPair(avoidSet, triggerTopic || sameField[sameField.length - 1] || '');
 
+  const stp = buildSuggestedTopicPrompt({ triggerTopic, recent, sameField, trendSeeds: GLOBAL_TREND_SEEDS, avoidSet });
   const ai = await generateStructured([
-    {
-      role: 'system',
-      content: `You are a study coach. Return JSON only with this exact schema:
-{"suggestions":[{"topic":string,"why":string,"honorableMentions":[string,string,string],"settings":{"level":string,"totalSlides":number,"paragraphLength":"brief"|"medium"|"detailed","paragraphCount":number,"tone":string,"complexity":"simple"|"standard"|"scholarly","imageDensity":"text-only"|"mostly-text"|"balanced"|"mostly-visual"},"customMessage":string},{"topic":string,"why":string,"honorableMentions":[string,string,string],"settings":{"level":string,"totalSlides":number,"paragraphLength":"brief"|"medium"|"detailed","paragraphCount":number,"tone":string,"complexity":"simple"|"standard"|"scholarly","imageDensity":"text-only"|"mostly-text"|"balanced"|"mostly-visual"},"customMessage":string}]}
-Rules:
-- Exactly 2 suggestions.
-- Gear suggestions toward the learner's recent interests and solving real problems.
-- Blend current global events/trends with the learner's progression history.
-- Topics must be short, classroom-safe, and distinct.
-- "why" must be concise (max 2 sentences).
-- settings are recommended defaults and must remain editable in the app.
-- totalSlides 2-20 and paragraphCount 1-7.`
-    },
-    {
-      role: 'user',
-      content: `Trigger topic from home interaction (if any): ${triggerTopic || 'none'}\n\nLearner recent history:\n${recent.map(g => `- ${g.finishedDate || g.finishedAt}: ${g.topic} / ${g.concept} (${g.level}) score ${g.correct}/${g.total}`).join('\n') || 'none yet'}\n\nInterest progression hints:\n${sameField.join('\n') || 'none'}\n\nCurrent trend seeds to consider:\n${GLOBAL_TREND_SEEDS.join('\n')}\n\nAvoid these topic names:\n${[...avoidSet].join('\n') || 'none'}`
-    }
+    { role: 'system', content: stp.system },
+    { role: 'user', content: stp.user }
   ], { temperature: 0.78, maxTokens: 2600 });
 
   const raw = Array.isArray(ai.suggestions) ? ai.suggestions : [];
@@ -2605,24 +2584,10 @@ app.post('/api/ai/time-travel-headline', auth, async (req, res) => {
     const games = await recentUserGames(req.user.username, 20);
     const interests = [...new Set(games.map(g => `${g.topic} / ${g.concept}`).filter(Boolean))].slice(-10);
     const status = summarizeLearnerStatus(games);
+    const tth = buildTimeTravelHeadlinePrompt({ normalizedPeriod, interests, status, trendSeeds: GLOBAL_TREND_SEEDS, avoidSet });
     const result = await generateStructured([
-      {
-        role: 'system',
-        content: `You invent the seed headline for the "Time Travel" activity on this learning site.
-
-How this site teaches: the headline becomes an adaptive slide presentation set in a chosen era. Each slide explains real concepts (causes, impacts, practical solutions) with support material and one challenging multiple-choice question; the learner's answer decides the next slide (wrong → correct the misconception, right → go deeper). So the headline should open a genuinely teachable, problem-solving scenario — not just a flashy title.
-
-Personalize to the learner's status below: lean toward their interests and weak spots so the resulting lesson reinforces what they need, while staying fresh (avoid repeating the "Avoid headlines").
-
-Return JSON only: {"headline":string}
-Rules:
-- One compelling, classroom-safe news-style headline set in the ${normalizedPeriod}.
-- Educational and problem-solving oriented; 7-16 words; no sensational violence.`
-      },
-      {
-        role: 'user',
-        content: `Learner interests:\n${interests.join('\n') || 'none yet'}\n\nLearner status data:\n${status}\n\nTrend seeds:\n${GLOBAL_TREND_SEEDS.join('\n')}\n\nAvoid headlines:\n${[...avoidSet].join('\n') || 'none'}`
-      }
+      { role: 'system', content: tth.system },
+      { role: 'user', content: tth.user }
     ], { temperature: 0.85, maxTokens: 240 });
 
     const raw = String(result.headline || '').trim();
@@ -2649,27 +2614,10 @@ app.post('/api/ai/structured-explanation-suggest', auth, async (req, res) => {
   try {
     const interests = [...new Set(games.map(g => `${g.topic} / ${g.concept}`).filter(Boolean))].slice(-12);
     const status = summarizeLearnerStatus(games);
+    const ssp = buildStructuredSuggestPrompt({ interests, status, avoidSet });
     const result = await generateStructured([
-      {
-        role: 'system',
-        content: `You suggest the next topic + settings for the "Structured Explanations" activity on this learning site.
-
-How this site teaches (respect it when choosing settings): every topic becomes an adaptive slide presentation. Each slide has explanatory paragraphs plus support material (LaTeX, tables, code, diagrams/SVG, or images) and one challenging multiple-choice question. When the learner answers, the NEXT slide is generated from that answer — a wrong answer is met with a slide that names the misconception and steers back on track; a right answer earns a deeper slide. Settings therefore shape a whole branching lesson, not a single card.
-
-Pick settings that fit BOTH the topic and this learner's status:
-- Symbol-heavy domains (math proofs, algorithms, physics) → exampleType "proof"/"worked-example", higher support material (LaTeX carries the reasoning), alternateVisualMath true.
-- Conceptual/humanities domains (history, biology, economics narrative) → exampleType "outline"/"graph-table", more text than support material ("mostly-text"), imagery used to illustrate rather than derive.
-- If the learner is scoring low on recent work, ease the level and complexity and lean text-heavier; if they are strong, raise the challenge.
-- Prefer a topic that builds on a weak spot or a fresh but related area they have NOT seen; avoid the "Avoid prompts".
-
-Return JSON only with this schema:
-{"prompt":string,"exampleType":"proof"|"worked-example"|"graph-table"|"tree-diagram"|"outline","level":"Beginner"|"Lower Intermediate"|"Upper Intermediate"|"Advanced"|"PhD","tone":string,"complexity":"simple"|"standard"|"scholarly","paragraphLength":"brief"|"medium"|"detailed","imageDensity":"text-only"|"mostly-text"|"balanced"|"mostly-visual","totalSlides":number,"continuation":"more-examples"|"different-examples"|"related-topics","alternateVisualMath":boolean}
-- Keep prompt concise and classroom-safe.`
-      },
-      {
-        role: 'user',
-        content: `Learner recent interests:\n${interests.join('\n') || 'none yet'}\n\nLearner status data:\n${status}\n\nAvoid prompts:\n${[...avoidSet].join('\n') || 'none'}`
-      }
+      { role: 'system', content: ssp.system },
+      { role: 'user', content: ssp.user }
     ], { temperature: 0.8, maxTokens: 700 });
 
     const prompt = String(result.prompt || '').trim();
@@ -2707,22 +2655,10 @@ app.post('/api/ai/path/level-refresh', auth, async (req, res) => {
   }
 
   try {
+    const lr = buildLevelRefreshPrompt({ level, wanted, topic, guidance, avoid, recent });
     const result = await generateStructured([
-      {
-        role: 'system',
-        content: `You are a curriculum designer. Return JSON only:
-{"level":string,"description":string,"concepts":[{"name":string,"blurb":string}]}
-Rules:
-- level must be exactly "${level}".
-- exactly ${wanted} concepts.
-- Keep concepts strictly at ${level} difficulty.
-- concepts must be different from the avoid list.
-- blurb max 15 words each.`
-      },
-      {
-        role: 'user',
-        content: `Topic: ${topic}\n${guidance ? `Guidance: ${guidance}\n` : ''}Avoid concepts:\n${avoid.join('\n') || 'none'}\n\nRecent learner history:\n${recent || 'none yet'}\n\nBalance: reinforce this learner's weak spots while still surfacing globally relevant, timely angles.`
-      }
+      { role: 'system', content: lr.system },
+      { role: 'user', content: lr.user }
     ], { temperature: 0.8, maxTokens: 2200 });
 
     const out = {
@@ -2804,77 +2740,15 @@ app.post('/api/ai/slide', auth, async (req, res) => {
     ? 'STEM alternation for this slide: emphasize theory + formulas/proof first, then support with a visual aid.'
     : 'STEM alternation for this slide: emphasize visual intuition first, then include code or formulas/proof with detailed explanation.';
 
-  const system = `You are an expert teacher generating ONE slide of an adaptive learning presentation. Respond ONLY with JSON in this schema:
-{
- "title": string (max 8 words),
- "summary": string (one sentence describing what this slide taught, for memory),
- "components": [
-   {"type":"text","content":string (may contain inline LaTeX between single $ signs, e.g. $E=mc^2$)} |
-   {"type":"keypoints","items":[string,...]} |
-   {"type":"definition","term":string,"content":string} |
-   {"type":"example","content":string} |
-   {"type":"table","headers":[string,...],"rows":[[string,...],...],"caption":string} |
-   {"type":"latex","content":string (a DISPLAY formula in LaTeX, WITHOUT surrounding $),"caption":string} |
-   {"type":"code","language":string,"content":string (a real, correct, well-formatted snippet with newlines)} |
-   {"type":"chart","chartType":"bar"|"pie"|"line"|"scatter"|"bubble","title":string,"series":[{"label":string,"value":number}] (for bar/pie),"points":[{"x":number,"y":number,"r":number,"label":string}] (for line/scatter/bubble; r only for bubble),"xLabel":string,"yLabel":string,"caption":string} |
-   {"type":"stickynote","color":"yellow"|"pink"|"blue"|"green"|"orange","title":string (short),"note":string (a highlight, key takeaway, mnemonic, warning, or historical anecdote)} |
-  {"type":"svg","svg":"<svg...>","caption":string} |
-  {"type":"image","prompt":string,"caption":string,"frame":"paper"|"polaroid"}
- ],
- "quiz": {
-   "question": string,
-   "options": [
-     {"text": string, "correct": boolean, "explanation": string (1-2 sentences shown when this option is picked), "misconception": string (for wrong options: what misunderstanding this choice reveals; empty for the correct one)}
-   ]
- }
-}
-Rules:
-- Exactly 4 quiz options, exactly ONE with "correct": true, shuffled position.
-- Make the quiz genuinely CHALLENGING, not obvious: every option must be on-topic and plausible to someone who only half-understood the slide. Never make the correct answer the conspicuously longest or most detailed, and never make wrong options absurd or off-topic. Each wrong option is a common, tempting mistake that reveals a DIFFERENT misconception. A careless reader should be able to fall for a distractor; only careful reasoning from the slide's paragraphs should yield the right answer.
-- QUIZ DIFFICULTY (enforce hard): the answer must NOT be guessable from wording alone. Make all four options similar in length, specificity, tone and vocabulary — no option should stand out as "the textbook one." Do NOT reuse the slide's exact phrasing in the correct answer; paraphrase it, and echo the slide's keywords in the distractors too. Every distractor must be true-sounding and at least partly correct, failing only on a precise point (a swapped cause/effect, a wrong condition or bound, a right idea applied to the wrong case, a subtle over-generalization). Avoid joke/filler options like "memorize without understanding" or "ignore the constraints". Prefer questions that require APPLYING the concept to a new specific case or picking the one correct statement among four nuanced claims, rather than asking which generic study strategy is best. A knowledgeable learner should have to think; a skimmer should be genuinely tempted by a distractor.
-- LENGTH: the slide MUST contain exactly ${paraCount} distinct paragraph(s) of prose (as separate "text" components), each about ${paragraphWords} words. Do not collapse them, and do not pad — each paragraph carries new substance. ${densityRule}
-- COHESION: the paragraphs must build on one another in order — introduce the idea, develop it, then apply or consolidate it — never restating the same point. The slide must also connect to the previous slides (briefly recall or build on them) and set up what comes next, so the whole presentation reads as one continuous, complementary lesson rather than isolated cards.
-- COMPONENT STRATEGY: choose support components deliberately to fit the subject and this specific concept — never scatter them at random, and never add one that does not clarify the idea. ${componentStrategy} Place the most important visual near the point it explains, and order components so the slide reads top-to-bottom as a single argument.
-- CHARTS: use a "chart" component when numbers, comparisons, trends, distributions or relationships are central. Pick the chartType by its job — bar (compare categories), line (change over time), pie (parts of a whole, ≤6 slices), scatter (relationship between two variables), bubble (relationship with a third magnitude as radius). Provide "series" [{label,value}] for bar/pie and "points" [{x,y[,r][,label]}] for line/scatter/bubble. Use realistic, clearly-labelled, illustrative values and always set a title and axis labels where relevant.
-- STICKY NOTES: use a "stickynote" for ONE punchy highlight, key takeaway, mnemonic, warning, or (for history/humanities) a vivid anecdote, date, or name. Keep it short; do not put a whole paragraph on it. Vary the color meaningfully (e.g. pink for a warning/common mistake, green for a takeaway, blue for a definition-style note).
-- TABLES: when using a table, keep it compact (3-6 rows, 2-6 columns), label headers clearly, and ensure every row directly supports the slide's teaching point.
-- QUIZ ALIGNMENT: if a table is included, it must directly help answer this slide's multiple-choice question or explain one likely misconception.
-- TABLE FORMAT: when a table appears, use exactly two columns labeled "Main idea" and "Different perspective"; each row should contrast the core point with a useful alternate angle or correction.
-- If a code snippet is included: ${codeDepth} Include clear inline comments that explain non-obvious lines and decisions.
-- If a LaTeX formula/proof block is included: ${equationDepth} Follow it with explanatory text that walks through the symbols and logic step-by-step.
-- If a LaTeX formula/proof block is included: ${equationDepth} Put the whole proof on the same slide in one displayed block when possible. Use short comments on the right of each line with aligned LaTeX, not separate captions or paragraphs that compete with the formula.
-- SUBJECT GATE FOR LATEX (hard rule): ${allowLatex
-  ? 'This concept is mathematical/technical, so LaTeX formulas and derivations are appropriate where symbols clarify the reasoning.'
-  : 'This concept is NOT mathematical (e.g. a language, history, art or other humanities topic). Do NOT use LaTeX, formulas, equations or symbolic notation anywhere — not even to lay out generic "logical steps". Never render a slide as a bare list of generic steps. Instead teach with prose PLUS real support material: a generated image, a table (conjugations, comparisons, timelines), an SVG diagram, a chart when there is real data, and sticky notes for rules/examples/mnemonics/anecdotes.'}
-- ${allowLatex ? 'If the concept is mathematical or another topic where symbols clarify the reasoning, prefer a displayed LaTeX derivation even if the example is not explicitly a formal proof.' : 'Do not use LaTeX for this topic.'}
-- Across slides, vary representation naturally: include some text-only consolidation slides when a repeated formula would add little, and use formula slides only when symbols clarify a new step.
-- Never repeat the exact same displayed LaTeX block on consecutive slides; continue by adding or refining a different step.
-- REPRESENTATION VARIETY (important): do NOT make the presentation LaTeX-only. LaTeX is for symbolic reasoning, but across the slides you must also use OTHER component types where they explain better — a chart for quantities/trends/relationships, a table for structured comparisons, an svg diagram for structure/flow, and a sticky note for a highlight or common mistake. Aim for at least one non-LaTeX support component every couple of slides; a slide whose idea is best shown as a graph or diagram should use that, not a formula. Note: LaTeX here renders with KaTeX (math only) — it CANNOT draw TikZ/PGFPlots graphics, so use the "chart" or "svg" component for any plot or diagram.
-- IMAGE POLICY (adaptive): ${visualPlan.promptRule}
-- If including an image component, use a precise educational prompt that names the concept and the exact element to visualize. Avoid decorative prompts.
-- Any formula/proof/code explanation should be as substantial as the selected paragraph length setting; avoid tiny token examples for long-form settings.
-- ${allowLatex ? `${stemAlternation} For this STEM-heavy concept, include either a code snippet or a LaTeX formula/proof block, plus textual explanation tying them together. If the topic naturally benefits from symbolic math, prefer a proof/derivation page.` : 'Do NOT use LaTeX or code to explain this non-technical concept; use images, tables, svg diagrams and sticky notes instead.'}
-- ${effectiveProof ? 'PROOF MODE: maintain proof continuity across slides. Use displayed LaTeX on most slides, but allow occasional text-only consolidation when it prevents repeating the same formula block. Continue by advancing or repairing one step at a time.' : ''}
-- ${isTimeTravelActivity
-  ? 'This is a Time Travel activity slide: keep the explanation timeline-aware and use a table only if it genuinely clarifies the progression.'
-  : "For non-time-travel activities, keep the explanation tied to the concept and the learner's previous answer."}
-- ${allowModelSvg ? 'SVG is allowed when it is the clearest explanatory visual.' : 'Prefer image prompts over SVG when a pictorial explanation is better.'}
-- Tone/sentiment of all writing: ${settings.tone || 'friendly lecture'}. Complexity of language: ${settings.complexity || 'standard'}. Audience level: ${level}.
-${settings.language ? `- Write ALL text (including quiz and explanations) in ${settings.language}.\n` : ''}${settings.audience ? `- The reader is: ${settings.audience}. Pitch every explanation to them.\n` : ''}${settings.customInstructions ? `- Extra author instructions from the learner (follow them where they don't conflict with the schema): ${settings.customInstructions}\n` : ''}
-- The ${paraCount} substantive paragraph(s) are required every time, alongside any optional table.
-- Make the next slide depend on the previous answer: if the learner was wrong, explicitly explain the misconception and steer them back toward the right reasoning; if the learner was right, reinforce the idea from a different angle and continue forward.`;
+  const system = buildSlideSystemPrompt({
+    paraCount, paragraphWords, densityRule, componentStrategy, codeDepth,
+    equationDepth, allowLatex, stemAlternation, effectiveProof,
+    isTimeTravelActivity, allowModelSvg, settings, level,
+    visualPromptRule: visualPlan.promptRule
+  });
 
-  const historyText = history.length
-    ? 'Slides so far:\n' + history.map((h, i) =>
-        `${i + 1}. "${h.title}" — ${h.summary} (quiz: "${h.question}" → learner chose "${h.chosen}", ${h.correct ? 'CORRECT' : 'WRONG'}). Visuals used: ${Array.isArray(h.visualRefs) && h.visualRefs.length ? h.visualRefs.join(' || ') : 'none'}`).join('\n')
-    : 'This is the first slide.';
-
-  let branchText = '';
-  if (branch) {
-    branchText = branch.correct
-      ? `\nThe learner just answered the previous quiz CORRECTLY ("${branch.chosenText}"). This slide must go DEEPER into the concept: build on that success and drill further.`
-      : `\nThe learner just answered the previous quiz WRONG ("${branch.chosenText}"), revealing this misconception: "${branch.misconception}". This slide must REDIRECT them: address that specific misconception head-on, re-explain the underlying idea from a different angle, then move forward.`;
-  }
+  const historyText = buildSlideHistoryText(history);
+  const branchText = buildSlideBranchText(branch);
 
   if (!geminiEnabled && !deepseekEnabled) {
     const slide = makeFallbackSlide({ topic, concept, level, settings, slideNumber, totalSlides, branch });
@@ -2916,7 +2790,7 @@ ${settings.language ? `- Write ALL text (including quiz and explanations) in ${s
     return res.json(slide);
   }
 
-  const user = `Topic: ${topic}\nConcept being taught: ${concept}\nAudience level: ${level}\nThis is slide ${slideNumber} of ${totalSlides}.${slideNumber >= totalSlides ? ' This is the FINAL content slide: wrap up the concept and make the quiz a synthesis question.' : ''}\n${historyText}${branchText}`;
+  const user = buildSlideUserPrompt({ topic, concept, level, slideNumber, totalSlides, historyText, branchText });
 
   try {
     const slide = await generateStructured([{ role: 'system', content: system }, { role: 'user', content: user }], { temperature: 0.85, maxTokens: 8192 });
@@ -2974,18 +2848,10 @@ app.post('/api/ai/recommend', auth, async (req, res) => {
     return res.json(fallback);
   }
   try {
+    const rec = buildRecommendPrompt({ topic, concept, level, correct, total, durationSec, history, slides });
     const result = await generateStructured([
-      {
-        role: 'system',
-        content: `You are a learning coach. Given a learner's quiz performance, respond ONLY with JSON:
-{"summary": string (2 sentences, warm, specific), "questionSummary": [string, string, string], "answerSummary": [string, string, string], "aiNotes": [string, string, string], "recommendations": [string, string, string], "nextConcepts": [{"name": string, "level": string}]}
-Recommendations must reference the actual mistakes made. questionSummary should list the main question themes in this lesson. answerSummary should list the learner's answer patterns or choices. aiNotes should compare this lesson against the recent history below and explain the learner's progress in the same field, with specific next steps. nextConcepts: 2-3 concepts to study next.`
-      },
-      {
-        role: 'user',
-        content: `Topic: ${topic}, concept: ${concept}, level: ${level}. Score ${correct}/${total} in ${durationSec}s.\n\nRecent lessons in the same field:\n${history.filter(g => g.topic === topic).map(g => `- ${g.finishedDate || g.finishedAt}: ${g.concept} (${g.level}) ${g.correct}/${g.total}`).join('\n') || 'none yet'}\n\nAnswers:\n` +
-          slides.map((s, i) => `${i + 1}. "${s.question}" → chose "${s.chosen}" (${s.correct ? 'correct' : `wrong — misconception: ${s.misconception || 'unknown'}`})`).join('\n')
-      }
+      { role: 'system', content: rec.system },
+      { role: 'user', content: rec.user }
     ], { temperature: 0.7, maxTokens: 4096 });
     const questionSummary = slides.map(s => String(s.question || '').trim()).filter(Boolean);
     const answerSummary = slides.map(s => String(s.chosen || '').trim()).filter(Boolean);
@@ -3017,13 +2883,7 @@ app.post('/api/ai/chat', auth, async (req, res) => {
   }
   try {
     const reply = await generateText([
-      {
-        role: 'system',
-        content: `You are the SketchLearn coach: a friendly guide inside an adaptive learning website. The site works like this: the learner picks a topic (or types a custom one), the AI builds a learning path across Beginner → Lower Intermediate → Upper Intermediate → Advanced → PhD levels, the learner picks a concept and tunes settings (number of slides, tone, text complexity, paragraph length, and how visual the slides are), then plays through AI-generated slides each ending in a comprehension quiz; wrong answers branch into remediation slides, right answers drill deeper; the final slide shows their stats.
-Here is this learner's progress spreadsheet (their recent completed activities), as JSON:
-${JSON.stringify(progress, null, 1)}
-Use it to give concrete, personal guidance: point out strong/weak topics, suggest which concept and level to try next, and explain which settings to use. Keep replies short and warm (under 150 words unless asked for more). The learner is "${req.user.username}".`
-      },
+      { role: 'system', content: buildCoachChatSystem({ progress, username: req.user.username }) },
       ...messages.slice(-16).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: String(m.content).slice(0, 4000) }))
     ], { json: false, temperature: 0.8, maxTokens: 800 });
     res.json({ reply });
